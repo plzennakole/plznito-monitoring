@@ -1,0 +1,9 @@
+{
+  "port": 5000,
+  "httpserver": "flask",
+  "flask": {
+    "host": "",
+    "debug": true,
+    "processes": 4
+  }
+}
