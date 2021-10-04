@@ -18,8 +18,10 @@ def get_map(data_current):
 
     # make groups for the years
     years = {}
-    for y in range(2016, 2022):
-        years[y] = folium.FeatureGroup(name=str(y))
+    this_year = datetime.datetime.now().year
+    for y in range(2015, this_year):
+        years[y] = folium.FeatureGroup(name=str(y), show=False)
+    years[this_year] = folium.FeatureGroup(name=str(this_year), show=True)
 
     for item in data_current:
         if item['status_id'] == 2:
@@ -33,12 +35,16 @@ def get_map(data_current):
 
         date = item['created']['date']
         # get date for processing
-        date_time_obj = datetime.datetime.strptime(date, '%Y-%m-%d %H:%M:%S.%f')
+        try:
+            date_time_obj = datetime.datetime.strptime(date, '%Y-%m-%d %H:%M:%S.%f')
+        except ValueError:
+            date_time_obj = datetime.datetime.strptime(date, '%Y-%m-%d %H:%M:%S')
 
         description = item['description'].replace('\n', '<br>')
-        solution = item['solution'].replace('\n', '<br>')
+        #print(item["solution"])
+        solution = str(item['solution']).replace('\n', '<br>')
 
-        text = f"<b>{item['name']}</b><br>{date}<br>{description}<br><br>{solution}<br>"
+        text = f"<b>{item['name']} ({item['id']})</b><br>{date}<br>{description}<br><br>{solution}<br>"
 
         if len(item['photos']) > 0:
             text += f"<img src='{item['photos'][0]['thumb'].replace('https', 'http')}'>"
