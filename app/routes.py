@@ -6,6 +6,11 @@ import ast
 import json
 import os
 import datetime
+import logging
+
+logging.basicConfig(filename='plznito_monitoring.log',
+                    level=logging.INFO,
+                    format='%(asctime)s %(message)s')
 
 from app import app
 
@@ -97,7 +102,9 @@ def get_map(data_current):
 
 @app.route('/')
 def index():
+    logging.info(f"loading data from .json")
     data = json.load(open("plznito_cyklo.json"))
+    logging.info(f"rendering map")
     map = get_map(data)
     #map.save(os.path.join(os.tmpdir(), 'app/templates/map.html'))
     return map._repr_html_()
