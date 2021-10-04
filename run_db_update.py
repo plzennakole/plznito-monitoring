@@ -26,8 +26,14 @@ def filter_data(data):
     """
     Simple filtering of cycling items
     """
-    data_cyklo = [x for x in data["items"] if "cykl" in x["report"].lower() or "kolob" in x["report"].lower() or "cikli" in x["report"].lower()]
-    logging.info(f"Filtered {len(data_cyklo)} cycling items.")
+    data_cyklo = []
+    for x in data["items"]:
+        if not "report" in x:
+            print(f"report nto found in data {x}")
+            continue
+        if "cykl" in x["report"].lower() or "kolob" in x["report"].lower() or "cikli" in x["report"].lower():
+            if "recykl" not in x["report"].lower():
+                data_cyklo.append(x)
     return data_cyklo
 
 
