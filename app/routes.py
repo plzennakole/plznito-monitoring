@@ -99,13 +99,23 @@ def get_map(data_current):
     # heatmap: https://autogis-site.readthedocs.io/en/latest/notebooks/L5/02_interactive-map-folium.html#heatmap
 
 
-
-@app.route('/')
-def index():
+def render_map_to_file():
     logging.info(f"loading data from .json")
     data = json.load(open("plznito_cyklo.json"))
     logging.info(f"rendering map")
     map = get_map(data)
+    map.save('app/templates/map.html')
+    return True
+
+
+@app.route('/')
+def index():
+    #logging.info(f"loading data from .json")
+    #data = json.load(open("plznito_cyklo.json"))
+    #logging.info(f"rendering map")
+    #map = get_map(data)
     #map.save(os.path.join(os.tmpdir(), 'app/templates/map.html'))
-    return map._repr_html_()
-    #return render_template('index.html')
+    #return map._repr_html_()
+
+    # save computations
+    return render_template('index.html')
