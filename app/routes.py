@@ -5,6 +5,7 @@ from folium.plugins import MarkerCluster, Fullscreen
 import ast
 import json
 import os
+import datetime
 
 from app import app
 
@@ -13,8 +14,12 @@ except NameError: ipynb_path = os.getcwd()
 
 
 def get_map(data_current):
-    m = folium.Map(location=[49.7, 13.4], zoom_start=12,  control_scale=True)
-    marker_cluster = MarkerCluster().add_to(m)
+    m = folium.Map(location=[49.7, 13.4], zoom_start=13,  control_scale=True)
+
+    # make groups for the years
+    years = {}
+    for y in range(2016, 2022):
+        years[y] = folium.FeatureGroup(name=str(y))
 
     for item in data_current:
         if item['status_id'] == 2:
@@ -25,31 +30,43 @@ def get_map(data_current):
             color = "lightgreen"
         else:
             color = "red"
+
         date = item['created']['date']
+        # get date for processing
+        date_time_obj = datetime.datetime.strptime(date, '%Y-%m-%d %H:%M:%S.%f')
+
         description = item['description'].replace('\n', '<br>')
         solution = item['solution'].replace('\n', '<br>')
 
         text = f"<b>{item['name']}</b><br>{date}<br>{description}<br><br>{solution}<br>"
 
         if len(item['photos']) > 0:
-            text += f"<img src='{item['photos'][0]['thumb']}'>"
+            text += f"<img src='{item['photos'][0]['thumb'].replace('https', 'http')}'>"
 
         popup = folium.Popup(text, max_width=300, min_width=300)
         folium.Marker(
             location=[item["latitude"], item["longitude"]],
             popup=popup,
             icon=folium.Icon(color=color, icon="ok-sign"),
-        ).add_to(marker_cluster)
+        ).add_to(years[date_time_obj.year])
+
+    for k, v in years.items():
+        v.add_to(m)
+    folium.LayerControl(collapsed=False).add_to(m)
 
     legend_html = '''
          <div style="position: fixed; 
-         top: 50px; left: 50px; width: 100px; height: 90px; 
+         top: 50px; left: 50px; width: 140px; height: 160px; 
          border:2px solid grey; z-index:9999; font-size:14px;
          ">&nbsp; Legenda <br>
-         &nbsp; East &nbsp; <i class="fa fa-map-marker fa-2x"
+         &nbsp; Vyřešeno &nbsp; <i class="fa fa-map-marker fa-2x"
                       style="color:green"></i><br>
-         &nbsp; West &nbsp; <i class="fa fa-map-marker fa-2x"
-                      style="color:orange"></i>
+         &nbsp; Odpoězeno &nbsp; <i class="fa fa-map-marker fa-2x"
+                      style="color:lightgreen"></i><br>
+         &nbsp; V řešení &nbsp; <i class="fa fa-map-marker fa-2x"
+                      style="color:orange"></i><br>
+         &nbsp; Odmítnuto / nevyřešeno  &nbsp; <i class="fa fa-map-marker fa-2x"
+                      style="color:red"></i>
           </div>
          '''
     m.get_root().html.add_child(folium.Element(legend_html))
@@ -68,7 +85,6 @@ def get_map(data_current):
 
     return m
 
-
     # heatmap: https://autogis-site.readthedocs.io/en/latest/notebooks/L5/02_interactive-map-folium.html#heatmap
 
 
@@ -77,6 +93,6 @@ def get_map(data_current):
 def index():
     data = json.load(open("plznito_cyklo.json"))
     map = get_map(data)
-    map.save('app/templates/map.html')
-    #return map._repr_html_()
-    return render_template('index.html')
+    #map.save(os.path.join(os.tmpdir(), 'app/templates/map.html'))
+    return map._repr_html_()
+    #return render_template('index.html')
