@@ -72,7 +72,7 @@ def get_map(data_current):
          ">&nbsp; Legenda <br>
          &nbsp; Vyřešeno &nbsp; <i class="fa fa-map-marker fa-2x"
                       style="color:green"></i><br>
-         &nbsp; Odpoězeno &nbsp; <i class="fa fa-map-marker fa-2x"
+         &nbsp; Odpovězeno &nbsp; <i class="fa fa-map-marker fa-2x"
                       style="color:lightgreen"></i><br>
          &nbsp; V řešení &nbsp; <i class="fa fa-map-marker fa-2x"
                       style="color:orange"></i><br>
@@ -82,9 +82,9 @@ def get_map(data_current):
          '''
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    plus_button_html = '''<a href="#" class="w3-button w3-large w3-circle w3-green w3-ripple" style="position: fixed; 
-         top: 50px; left: 50px; z-index:9999;">+</a>'''
-    m.get_root().html.add_child(folium.Element(plus_button_html))
+    #plus_button_html = '''<a href="#" class="w3-button w3-large w3-circle w3-green w3-ripple" style="position: fixed;
+    #     top: 50px; left: 50px; z-index:9999;">+</a>'''
+    #m.get_root().html.add_child(folium.Element(plus_button_html))
     # plus overlay form to get new points to map
     # https://morioh.com/p/f23f87a146b4
 
