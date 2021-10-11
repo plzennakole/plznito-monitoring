@@ -24,9 +24,10 @@ def get_map(data_current):
     # make groups for the years
     years = {}
     this_year = datetime.datetime.now().year
-    for y in range(2015, this_year):
+    this_day = datetime.datetime.now()
+    for y in range(2015, this_year + 1):
         years[y] = folium.FeatureGroup(name=str(y), show=False)
-    years[this_year] = folium.FeatureGroup(name=str(this_year), show=True)
+    years["last_30_days"] = folium.FeatureGroup(name="Posledních 30 dnů", show=True)
 
     for item in data_current:
         if item['status_id'] == 2:
@@ -46,7 +47,6 @@ def get_map(data_current):
             date_time_obj = datetime.datetime.strptime(date, '%Y-%m-%d %H:%M:%S')
 
         description = item['description'].replace('\n', '<br>')
-        #print(item["solution"])
         solution = str(item['solution']).replace('\n', '<br>')
 
         text = f"<b>{item['name']} ({item['id']})</b><br>{date}<br>{description}<br><br>{solution}<br>"
@@ -55,11 +55,16 @@ def get_map(data_current):
             text += f"<img src='{item['photos'][0]['thumb'].replace('https', 'http')}'>"
 
         popup = folium.Popup(text, max_width=300, min_width=300)
-        folium.Marker(
+        marker = folium.Marker(
             location=[item["latitude"], item["longitude"]],
             popup=popup,
             icon=folium.Icon(color=color, icon="ok-sign"),
-        ).add_to(years[date_time_obj.year])
+        )
+        # put to "last 30 days" or correspondent year
+        if this_day - datetime.timedelta(days=30) < date_time_obj:
+            marker.add_to(years["last_30_days"])
+        else:
+            marker.add_to(years[date_time_obj.year])
 
     for k, v in years.items():
         v.add_to(m)
