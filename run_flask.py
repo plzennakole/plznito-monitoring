@@ -14,7 +14,6 @@ import json
 
 from app import app
 
-
 if __name__ == '__main__':
     if __name__ == '__main__':
         parser = argparse.ArgumentParser(description='Run "Plznito monitoring" server.')

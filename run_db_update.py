@@ -4,7 +4,6 @@ import requests
 from datetime import datetime
 import logging
 
-
 logging.basicConfig(filename='plznito_monitoring.log',
                     level=logging.INFO,
                     format='%(asctime)s %(message)s')
@@ -15,7 +14,8 @@ def get_plznito_current_data():
     Download json with all plzni.to data
     """
     # http://plzni.to/api/1.0/tickets/list?categoryId=0&statusId=0&arch=0&term=&own=0&term=
-    with requests.get('http://plzni.to/api/1.0/tickets/list?categoryId=0&statusId=0&arch=0&term=&own=0&term=') as response:
+    with requests.get(
+            'http://plzni.to/api/1.0/tickets/list?categoryId=0&statusId=0&arch=0&term=&own=0&term=') as response:
         data = response.json()
         logging.info("Downloaded current plznito json.")
         return data
@@ -69,7 +69,7 @@ def db_update(json_db_file_path, out_dirname=""):
     data_current = get_plznito_current_data()
 
     # save all for later
-    fname = os.path.join(out_dirname, datetime.today().strftime('%Y-%m-%d-%H:%M:%S')+".json")
+    fname = os.path.join(out_dirname, datetime.today().strftime('%Y-%m-%d-%H:%M:%S') + ".json")
     json.dump(data_current, open(fname, "w"), indent=4)
     logging.info(f"Saved to {fname}.")
 
