@@ -21,4 +21,4 @@ def annotation():
     with open("data", "a") as fout:
         fout.write(f"{idx} {value}\n")
 
-    return f"<h1>Dky</h1>Pro značku {idx} uloženo{value}"
+    return f"<h1>Dky</h1>Pro značku {idx} uloženo {value}"
