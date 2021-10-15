@@ -46,7 +46,9 @@ def get_map(data_current):
         description = item['description'].replace('\n', '<br>')
         solution = str(item['solution']).replace('\n', '<br>')
 
-        text = f"<b>{item['name']} ({item['id']})</b><br>{date}<br>{description}<br><br>{solution}<br>"
+        text = f"<b>{item['name']} " \
+               f"(<a href='http://plzni.to/map#!/activity/{item['id']}' target='_blank'>{item['id']}</a>)</b><br>" \
+               f"{date}<br>{description}<br><br>{solution}<br>"
 
         if len(item['photos']) > 0:
             text += f"<img src='{item['photos'][0]['thumb'].replace('https', 'http')}'>"
