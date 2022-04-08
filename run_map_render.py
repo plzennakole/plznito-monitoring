@@ -16,7 +16,7 @@ except NameError:
 
 
 def get_map(data_current):
-    m = folium.Map(location=[49.7, 13.4], zoom_start=13, control_scale=True)
+    m = folium.Map(location=[49.7443392, 13.3766164], zoom_start=13, control_scale=True)
 
     # make groups for the years
     years = {}
