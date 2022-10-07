@@ -3,6 +3,8 @@ import os
 import requests
 from datetime import datetime
 import logging
+import bz2
+import sys
 
 logging.basicConfig(filename='plznito_monitoring.log',
                     level=logging.INFO,
@@ -48,13 +50,22 @@ def merge_data(data_old, data_new):
     return data_out
 
 
-def db_restore():
+def db_restore(start_json_name=None, data_dirname="."):
     # how to process all data
     # aka DB restore
-    data = {[]}
-    for i in sorted(os.listdir(".")):
-        if i.endswith(".json"):
-            data_new = json.load(open(i))
+    if start_json_name is not None:
+        data = json.load(open(start_json_name))
+    else:
+        data = []
+
+    for fname in sorted(os.listdir(data_dirname)):
+        full_fname = os.path.join(data_dirname, fname)
+        if full_fname.endswith(".json"):
+            data_new = json.load(open(full_fname))
+            data_cyklo = filter_data(data_new)
+            data = merge_data(data, data_cyklo)
+        elif full_fname.endswith("bz2"):
+            data_new = json.loads(bz2.decompress(open(full_fname, "rb").read()))
             data_cyklo = filter_data(data_new)
             data = merge_data(data, data_cyklo)
 
@@ -84,4 +95,7 @@ def db_update(json_db_file_path, out_dirname=""):
 
 
 if __name__ == "__main__":
-    db_update("plznito_cyklo.json", out_dirname="notebooks")
+    if len(sys.argv) == 1:
+        db_update("plznito_cyklo.json", out_dirname="notebooks")
+    elif len(sys.argv) == 2 and sys.argv[1] == "restore":
+        db_restore(start_json_name="plznito_cyklo_04-10-2021.json", data_dirname="data")
