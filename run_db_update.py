@@ -82,7 +82,10 @@ def db_update(json_db_file_path, out_dirname=""):
 
     # save all for later
     fname = os.path.join(out_dirname, datetime.today().strftime('%Y-%m-%d-%H:%M:%S') + ".json")
-    json.dump(data_current, open(fname, "w"), indent=4)
+    # dump to bz2
+    with bz2.open(fname + ".bz2", "wt") as f:
+        json.dump(data_current, f, indent=4)
+    # json.dump(data_current, open(fname, "w"), indent=4)
     logging.info(f"Saved to {fname}.")
 
     # filter only cyklo and convert to csv

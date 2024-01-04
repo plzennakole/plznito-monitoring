@@ -49,9 +49,11 @@ if __name__ == "__main__":
                 d = d["item"]
             data.append(d)
 
+    data_ = {"items": data}
+
     # save all data
-    json.dump(data, open("plznito_all.json", "w"), indent=4)
+    json.dump(data_, open("plznito_all.json", "w"), indent=4)
 
     # filter only cyklo
-    data_cyklo = filter_data(data)
+    data_cyklo = filter_data(data_)
     json.dump(data_cyklo, open("plznito_cyklo.json", "w"), indent=4)
