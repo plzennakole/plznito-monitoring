@@ -31,9 +31,10 @@ def filter_data(data):
     data_cyklo = []
     for x in data["items"]:
         if not "report" in x:
-            print(f"report nto found in data {x}")
+            print(f"report not found in data {x}")
             continue
-        if "cykl" in x["report"].lower() or "kolob" in x["report"].lower() or "cikli" in x["report"].lower():
+        if "cykl" in x["report"].lower() or "kolob" in x["report"].lower() or "cikli" in x["report"].lower()\
+                or "cyklo" in x["name"].lower() or "kolob" in x["name"].lower():
             if "recykl" not in x["report"].lower():
                 data_cyklo.append(x)
     return data_cyklo
