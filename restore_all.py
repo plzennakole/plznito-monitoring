@@ -2,14 +2,14 @@ import requests
 import os
 import json
 import tqdm
-
+import simplejson.errors
 
 def download_one_id(id):
     url = f"https://www.plznito.cz/api/1.0/tickets/detail/{id}"
     try:
         r = requests.get(url)
         out = r.json()
-    except requests.exceptions.JSONDecodeError:
+    except (simplejson.errors.JSONDecodeError, requests.exceptions.JSONDecodeError):
         print(f"Error with {id}")
         return {}
     return out
