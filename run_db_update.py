@@ -1,14 +1,13 @@
-import json
-import os
-import requests
-from datetime import datetime
-import logging
+import argparse
 import bz2
-import sys
+import json
+import logging
+import os
+from datetime import datetime
 
-logging.basicConfig(filename='plznito_monitoring.log',
-                    level=logging.INFO,
-                    format='%(asctime)s %(message)s')
+import requests
+
+logger = logging.getLogger(__name__)
 
 
 def get_plznito_current_data():
@@ -19,9 +18,8 @@ def get_plznito_current_data():
     with requests.get(
             'http://plzni.to/api/1.0/tickets/list?categoryId=0&statusId=0&arch=0&term=&own=0&term=') as response:
         data = response.json()
-        logging.info("Downloaded current plznito json.")
+        logger.info("Downloaded current plznito json.")
         return data
-    return {}
 
 
 def filter_data(data):
@@ -33,7 +31,7 @@ def filter_data(data):
         if not "report" in x:
             print(f"report not found in data {x}")
             continue
-        if "cykl" in x["report"].lower() or "kolob" in x["report"].lower() or "cikli" in x["report"].lower()\
+        if "cykl" in x["report"].lower() or "kolob" in x["report"].lower() or "cikli" in x["report"].lower() \
                 or "cyklo" in x["name"].lower() or "kolob" in x["name"].lower():
             if "recykl" not in x["report"].lower():
                 data_cyklo.append(x)
@@ -47,7 +45,7 @@ def merge_data(data_old, data_new):
     ids_new = [x["id"] for x in data_new]
     data_old = [x for x in data_old if x["id"] not in ids_new]
     data_out = data_old + data_new
-    logging.info(f"Merging {len(data_old)} + {len(data_new)} to {len(data_out)} items.")
+    logger.info(f"Merging {len(data_old)} + {len(data_new)} to {len(data_out)} items.")
     return data_out
 
 
@@ -73,7 +71,7 @@ def db_restore(start_json_name=None, data_dirname="."):
     json.dump(data, open("plznito_cyklo.json", "w"), indent=4)
 
 
-def db_update(json_db_file_path, out_dirname=""):
+def db_update(json_db_file_path, out_dirname="", filter_cyklo=True):
     """
     update with daily data
     """
@@ -85,21 +83,40 @@ def db_update(json_db_file_path, out_dirname=""):
     # dump to bz2
     with bz2.open(fname + ".bz2", "wt") as f:
         json.dump(data_current, f, indent=4)
-    # json.dump(data_current, open(fname, "w"), indent=4)
     logging.info(f"Saved to {fname}.")
-
-    # filter only cyklo and convert to csv
-    data_cyklo_current = filter_data(data_current)
 
     # add data to our db
     data_db = json.load(open(json_db_file_path))
-    data_cyklo_updated = merge_data(data_db, data_cyklo_current)
-    json.dump(data_cyklo_updated, open(json_db_file_path, "w"), indent=4)
+
+    if filter_cyklo:
+        # filter only cyklo and convert to csv
+        data_cyklo_current = filter_data(data_current)
+        print(len(data_cyklo_current))
+        data_cyklo_updated = merge_data(data_db, data_cyklo_current)
+        json.dump(data_cyklo_updated, open(json_db_file_path, "w"), indent=4)
+    else:
+        print(data_current["items"])
+        data_updated = merge_data(data_db, [x for x in data_current["items"]])
+        json.dump(data_updated, open(json_db_file_path, "w"), indent=4)
+
     logging.info("Merging finished.")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1:
-        db_update("plznito_cyklo.json", out_dirname="notebooks")
-    elif len(sys.argv) == 2 and sys.argv[1] == "restore":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--db_json", type=str, default="plznito_cyklo.json")
+    parser.add_argument("--filter_cyklo", action="store_true")
+    parser.add_argument("--restore", action="store_true")
+
+    args = parser.parse_args()
+
+    logging.basicConfig(filename='plznito_monitoring.log',
+                        level=logging.INFO,
+                        format='%(asctime)s %(message)s')
+
+    logger.info(f"Running with args: {args}")
+
+    db_update(args.db_json, out_dirname="notebooks", filter_cyklo=args.filter_cyklo)
+    if args.restore:
         db_restore(start_json_name="plznito_cyklo_04-10-2021.json", data_dirname="data")

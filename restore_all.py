@@ -3,6 +3,7 @@ import os
 import json
 import tqdm
 
+
 def download_one_id(id):
     url = f"https://www.plznito.cz/api/1.0/tickets/detail/{id}"
     try:
@@ -12,6 +13,7 @@ def download_one_id(id):
         print(f"Error with {id}")
         return {}
     return out
+
 
 def filter_data(data):
     """
@@ -33,7 +35,7 @@ if __name__ == "__main__":
 
     os.makedirs("data", exist_ok=True)
 
-    for i in tqdm.tqdm(range(1, 33874)):
+    for i in tqdm.tqdm(range(1, 38618)):
         if not os.path.exists(f"data/{i}.json"):
             json_data = download_one_id(i)
             with open(f"data/{i}.json", "w") as f:
@@ -49,11 +51,12 @@ if __name__ == "__main__":
                 d = d["item"]
             data.append(d)
 
-    data_ = {"items": data}
-
-    # save all data
-    json.dump(data_, open("plznito_all.json", "w"), indent=4)
+    # save all data, get just the items
+    # filet out emtpy items
+    data = [x for x in data if x != {}]
+    json.dump(data, open("plznito_all.json", "w"), indent=4)
 
     # filter only cyklo
+    data_ = {"items": data}
     data_cyklo = filter_data(data_)
     json.dump(data_cyklo, open("plznito_cyklo.json", "w"), indent=4)

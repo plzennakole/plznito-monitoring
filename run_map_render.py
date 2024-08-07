@@ -4,10 +4,11 @@ import json
 import os
 import datetime
 import logging
+import argparse
 
-logging.basicConfig(filename='plznito_monitoring.log',
-                    level=logging.INFO,
-                    format='%(asctime)s %(message)s')
+logger = logging.getLogger(__name__)
+
+
 
 try:
     ipynb_path
@@ -22,7 +23,7 @@ def get_map(data_current):
     years = {}
     this_year = datetime.datetime.now().year
     this_day = datetime.datetime.now()
-    for y in range(2015, this_year + 1):
+    for y in range(2014, this_year + 1):
         years[y] = folium.FeatureGroup(name=str(y), show=False)
     years["last_30_days"] = folium.FeatureGroup(name="Posledních 30 dnů", show=True)
 
@@ -54,6 +55,9 @@ def get_map(data_current):
             text += f"<img src='{item['photos'][0]['thumb'].replace('https', 'http')}'>"
 
         popup = folium.Popup(text, max_width=300, min_width=300)
+        if item["latitude"] is None or item["longitude"] is None:
+            print(item)
+            continue
         marker = folium.Marker(
             location=[item["latitude"], item["longitude"]],
             popup=popup,
@@ -103,14 +107,25 @@ def get_map(data_current):
     # heatmap: https://autogis-site.readthedocs.io/en/latest/notebooks/L5/02_interactive-map-folium.html#heatmap
 
 
-def render_map_to_file():
-    logging.info(f"loading data from .json")
-    data = json.load(open("plznito_cyklo.json"))
-    logging.info(f"rendering map")
+def render_map_to_file(file_in="plznito_cyklo.json", file_out="app/templates/map.html"):
+    logger.info(f"loading data from {file_in}")
+    data = json.load(open(file_in))
+    logger.info(f"rendering map")
     map = get_map(data)
-    map.save('app/templates/map.html')
-    return True
+    map.save(file_out)
 
 
 if __name__ == '__main__':
-    render_map_to_file()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--log_level", type=str, default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+    parser.add_argument("--file_in", type=str, default="plznito_cyklo.json")
+    parser.add_argument("--file_out", type=str, default="app/templates/map.html")
+    args = parser.parse_args()
+
+    logging.basicConfig(filename='plznito_monitoring.log',
+                        level=logging.INFO,
+                        format='%(asctime)s %(message)s')
+
+    render_map_to_file(args.file_in, args.file_out)
