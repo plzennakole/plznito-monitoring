@@ -9,7 +9,7 @@ def download_one_id(id):
     try:
         r = requests.get(url)
         out = r.json()
-    except (simplejson.errors.JSONDecodeError, requests.exceptions.JSONDecodeError):
+    except simplejson.errors.JSONDecodeError:
         print(f"Error with {id}")
         return {}
     return out
