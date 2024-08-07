@@ -15,7 +15,7 @@ def index():
 
 @app.route('/plznito_map_all')
 def plznito_map_all():
-    return render_template('map_all.html')
+    return render_template('index_map_all.html')
 
 
 @app.route('/annotation')

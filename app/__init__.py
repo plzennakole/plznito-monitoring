@@ -1,7 +1,5 @@
 from flask import Flask
-#from flask_toastr import Toastr
 import os
-#from flask_session import Session
 import logging
 
 app = Flask(__name__)
