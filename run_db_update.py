@@ -71,19 +71,20 @@ def db_restore(start_json_name=None, data_dirname="."):
     json.dump(data, open("plznito_cyklo.json", "w"), indent=4)
 
 
-def db_update(json_db_file_path, out_dirname="", filter_cyklo=True):
+def db_update(json_db_file_path, out_dirname="", filter_cyklo=True, save_update_data=False):
     """
     update with daily data
     """
     # load new data
     data_current = get_plznito_current_data()
 
-    # save all for later
-    fname = os.path.join(out_dirname, datetime.today().strftime('%Y-%m-%d-%H:%M:%S') + ".json")
-    # dump to bz2
-    with bz2.open(fname + ".bz2", "wt") as f:
-        json.dump(data_current, f, indent=4)
-    logging.info(f"Saved to {fname}.")
+    if save_update_data:
+        # save all for later
+        fname = os.path.join(out_dirname, datetime.today().strftime('%Y-%m-%d-%H:%M:%S') + ".json")
+        # dump to bz2
+        with bz2.open(fname + ".bz2", "wt") as f:
+            json.dump(data_current, f, indent=4)
+        logging.info(f"Saved to {fname}.")
 
     # add data to our db
     data_db = json.load(open(json_db_file_path))
@@ -108,7 +109,7 @@ if __name__ == "__main__":
     parser.add_argument("--db_json", type=str, default="plznito_cyklo.json")
     parser.add_argument("--filter_cyklo", action="store_true")
     parser.add_argument("--restore", action="store_true")
-
+    parser.add_argument("--save_update_data", action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(filename='plznito_monitoring.log',
