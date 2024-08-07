@@ -3,6 +3,11 @@ import os
 import json
 import tqdm
 import simplejson.errors
+import logging
+import argparse
+
+logger = logging.getLogger(__name__)
+
 
 def download_one_id(id):
     url = f"https://www.plznito.cz/api/1.0/tickets/detail/{id}"
@@ -33,19 +38,23 @@ def filter_data(data):
 
 if __name__ == "__main__":
 
-    os.makedirs("data", exist_ok=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_dir", type=str, default="data")
+    args = parser.parse_args()
+
+    os.makedirs(args.data_dir, exist_ok=True)
 
     for i in tqdm.tqdm(range(1, 38618)):
-        if not os.path.exists(f"data/{i}.json"):
+        if not os.path.exists(os.path.join(args.data_dir, f"{i}.json")):
             json_data = download_one_id(i)
-            with open(f"data/{i}.json", "w") as f:
+            with open(os.path.join(args.data_dir, f"{i}.json"), "w") as f:
                 json.dump(json_data, f)
 
     # load all data
     data = []
-    for fname in tqdm.tqdm(os.listdir("data")):
+    for fname in tqdm.tqdm(os.listdir(args.data_dir)):
         if fname.endswith(".json"):
-            d = json.load(open(os.path.join("data", fname)))
+            d = json.load(open(os.path.join(args.data_dir, fname)))
             # get only "item"
             if "item" in d:
                 d = d["item"]
