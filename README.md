@@ -44,5 +44,4 @@ Append the following entry for updating every midnight or every 6 hrs:
 python run_flask.py --config config.json
 ```
 
-
 (c) Plzen na kole 2021 
