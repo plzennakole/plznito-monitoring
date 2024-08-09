@@ -16,7 +16,7 @@ except NameError:
     ipynb_path = os.getcwd()
 
 
-def get_map(data_current):
+def get_map(data_current, cluster=False):
     m = folium.Map(location=[49.7443392, 13.3766164], zoom_start=13, control_scale=True)
 
     # make groups for the years
@@ -25,7 +25,11 @@ def get_map(data_current):
     this_day = datetime.datetime.now()
     for y in range(2014, this_year + 1):
         years[y] = folium.FeatureGroup(name=str(y), show=False)
+        if cluster:
+            years[y] = MarkerCluster(name=str(y)).add_to(years[y])
     years["last_30_days"] = folium.FeatureGroup(name="Posledních 30 dnů", show=True)
+    if cluster:
+        years["last_30_days"] = MarkerCluster(name="Posledních 30 dnů").add_to(years["last_30_days"])
 
     for item in data_current:
         if item['status_id'] == 2:
@@ -56,13 +60,14 @@ def get_map(data_current):
 
         popup = folium.Popup(text, max_width=300, min_width=300)
         if item["latitude"] is None or item["longitude"] is None:
-            print(item)
+            logger.debug(f"No LAT and LON in {item}")
             continue
         marker = folium.Marker(
             location=[item["latitude"], item["longitude"]],
             popup=popup,
             icon=folium.Icon(color=color, icon="ok-sign"),
         )
+
         # put to "last 30 days" or correspondent year
         if this_day - datetime.timedelta(days=30) < date_time_obj:
             marker.add_to(years["last_30_days"])
@@ -107,11 +112,12 @@ def get_map(data_current):
     # heatmap: https://autogis-site.readthedocs.io/en/latest/notebooks/L5/02_interactive-map-folium.html#heatmap
 
 
-def render_map_to_file(file_in="plznito_cyklo.json", file_out="app/templates/map.html"):
+def render_map_to_file(file_in="plznito_cyklo.json", file_out="app/templates/map.html",
+                       cluster=False):
     logger.info(f"loading data from {file_in}")
     data = json.load(open(file_in))
     logger.info(f"rendering map")
-    map = get_map(data)
+    map = get_map(data, cluster=cluster)
     map.save(file_out)
 
 
@@ -122,10 +128,11 @@ if __name__ == '__main__':
                         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
     parser.add_argument("--file_in", type=str, default="plznito_cyklo.json")
     parser.add_argument("--file_out", type=str, default="app/templates/map.html")
+    parser.add_argument("--cluster_style", action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(filename='plznito_monitoring.log',
                         level=logging.INFO,
                         format='%(asctime)s %(message)s')
 
-    render_map_to_file(args.file_in, args.file_out)
+    render_map_to_file(args.file_in, args.file_out, cluster=args.cluster_style)
