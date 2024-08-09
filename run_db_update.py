@@ -29,7 +29,7 @@ def filter_data(data):
     data_cyklo = []
     for x in data["items"]:
         if not "report" in x:
-            print(f"report not found in data {x}")
+            logger.debug(f"report not found in data {x}")
             continue
         if "cykl" in x["report"].lower() or "kolob" in x["report"].lower() or "cikli" in x["report"].lower() \
                 or "cyklo" in x["name"].lower() or "kolob" in x["name"].lower():
@@ -92,11 +92,9 @@ def db_update(json_db_file_path, out_dirname="", filter_cyklo=True, save_update_
     if filter_cyklo:
         # filter only cyklo and convert to csv
         data_cyklo_current = filter_data(data_current)
-        print(len(data_cyklo_current))
         data_cyklo_updated = merge_data(data_db, data_cyklo_current)
         json.dump(data_cyklo_updated, open(json_db_file_path, "w"), indent=4)
     else:
-        print(data_current["items"])
         data_updated = merge_data(data_db, [x for x in data_current["items"]])
         json.dump(data_updated, open(json_db_file_path, "w"), indent=4)
 
