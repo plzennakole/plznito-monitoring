@@ -44,7 +44,7 @@ if __name__ == "__main__":
 
     os.makedirs(args.data_dir, exist_ok=True)
 
-    for i in tqdm.tqdm(range(1, 38618)):
+    for i in tqdm.tqdm(range(1, 42100)):
         if not os.path.exists(os.path.join(args.data_dir, f"{i}.json")):
             json_data = download_one_id(i)
             with open(os.path.join(args.data_dir, f"{i}.json"), "w") as f:

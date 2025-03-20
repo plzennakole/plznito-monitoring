@@ -1,4 +1,7 @@
 from flask import Flask, render_template, request
+from flask import jsonify
+from flask_caching import Cache
+from train_delays import *
 import logging
 from app import app
 
@@ -18,13 +21,10 @@ def plznito_map_all():
     return render_template('index_map_all.html')
 
 
-@app.route('/annotation')
-def annotation():
-    # if key doesn't exist, returns None
-    idx = request.args.get('id')
-    value = request.args.get('value')
-
-    with open("data", "a") as fout:
-        fout.write(f"{idx} {value}\n")
-
-    return f"<h1>Díky</h1>Pro značku {idx} uloženo {value}"
+@app.route('/train_delays', methods=['GET'])
+@cache.cached(timeout=60)
+def get_delays():
+    delays_r = scrape_babitron_delays("https://kam.mff.cuni.cz/~babilon/zponline")
+    delays_os = scrape_babitron_delays("https://kam.mff.cuni.cz/~babilon/zponlineos")
+    delays = {**delays_r, **delays_os}
+    return jsonify(delays)
