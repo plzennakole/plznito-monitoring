@@ -11,6 +11,7 @@ logging.basicConfig(filename='plznito_monitoring.log',
                     level=logging.INFO,
                     format='%(asctime)s %(message)s')
 
+cache = Cache(app, config={'CACHE_TYPE': 'simple'})
 @app.route('/')
 def index():
     return render_template('index.html')

@@ -4,8 +4,8 @@ from fake_headers import Headers
 from flask import Flask, jsonify
 from flask_caching import Cache
 
-app = Flask(__name__)
-cache = Cache(app, config={'CACHE_TYPE': 'simple'})
+#app = Flask(__name__)
+
 
 def get_text(html):
     soup = BeautifulSoup(html, "html.parser")
@@ -77,14 +77,14 @@ def scrape_babitron_delays(url):
 
     return results
 
-@app.route('/train_delays', methods=['GET'])
-@cache.cached(timeout=60)
-def get_delays():
-    delays_r = scrape_babitron_delays("https://kam.mff.cuni.cz/~babilon/zponline")
-    delays_os = scrape_babitron_delays("https://kam.mff.cuni.cz/~babilon/zponlineos")
-    delays = {**delays_r, **delays_os}
-    return jsonify(delays)
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
+# @app.route('/train_delays', methods=['GET'])
+# @cache.cached(timeout=60)
+# def get_delays():
+#     delays_r = scrape_babitron_delays("https://kam.mff.cuni.cz/~babilon/zponline")
+#     delays_os = scrape_babitron_delays("https://kam.mff.cuni.cz/~babilon/zponlineos")
+#     delays = {**delays_r, **delays_os}
+#     return jsonify(delays)
+#
+#
+# if __name__ == "__main__":
+#     app.run(debug=True)
