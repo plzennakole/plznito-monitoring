@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request
 from flask import jsonify
 from flask_caching import Cache
-from train_delays import *
+from app.train_delays import *
 import logging
 from app import app
 
