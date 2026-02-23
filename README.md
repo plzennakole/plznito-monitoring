@@ -37,6 +37,10 @@ Optional crawl tuning flags:
 ```shell
 python run_db_update.py --db_json plznito_cyklo.json --anchor-id 49553 --id-window-back 500 --id-lookahead 300 --seed-data-dir data
 ```
+To avoid scraping twice in pipelines, update all tickets once and derive cycling tickets in the same run:
+```shell
+python run_db_update.py --db_json plznito_all.json --write-cyklo-json plznito_cyklo.json
+```
 
 For restore-only mode (does not run live update in the same invocation):
 ```shell

@@ -15,6 +15,7 @@ CYKLO_DB_FILENAME = "plznito_cyklo.json"
 ID_WINDOW_BACK_DEFAULT = 100
 ID_LOOKAHEAD_DEFAULT = 200
 SEED_DATA_DIR_DEFAULT = "data"
+MAX_CONSECUTIVE_SCRAPE_FAILURES = 10
 
 
 def _load_json_file(file_path):
@@ -193,23 +194,42 @@ def get_plznito_current_data(
 
     items = []
     empty_items = 0
+    consecutive_failures = 0
+    scanned_count = 0
     for ticket_id in range(start_id, end_id + 1):
+        scanned_count += 1
         try:
             scraped_data = download_one_id(ticket_id, source="web")
             logger.info("Downloaded ticket %d via web scraping.", ticket_id)
         except Exception as exc:  # pragma: no cover - network/runtime dependent
             logger.warning("Web scrape failed for id %s: %s", ticket_id, exc)
             empty_items += 1
+            consecutive_failures += 1
+            if consecutive_failures >= MAX_CONSECUTIVE_SCRAPE_FAILURES:
+                logger.warning(
+                    "Stopping crawl after %d consecutive failures at id %d.",
+                    consecutive_failures,
+                    ticket_id,
+                )
+                break
             continue
 
         item = _extract_item(scraped_data)
         if item is None:
             empty_items += 1
+            consecutive_failures += 1
+            if consecutive_failures >= MAX_CONSECUTIVE_SCRAPE_FAILURES:
+                logger.warning(
+                    "Stopping crawl after %d consecutive failures at id %d.",
+                    consecutive_failures,
+                    ticket_id,
+                )
+                break
             continue
         items.append(item)
+        consecutive_failures = 0
 
     payload = _validate_payload({"items": items})
-    scanned_count = end_id - start_id + 1
     logger.info(
         "Downloaded current plznito payload via web scraping (anchor=%s, source=%s, range=%d-%d, "
         "scanned=%d, items=%d, empty=%d).",
@@ -337,6 +357,7 @@ def db_update(
     out_dirname="",
     filter_cyklo=True,
     save_update_data=False,
+    write_cyklo_json_path=None,
     anchor_id=None,
     id_window_back=ID_WINDOW_BACK_DEFAULT,
     id_lookahead=ID_LOOKAHEAD_DEFAULT,
@@ -364,9 +385,20 @@ def db_update(
         data_cyklo_current = filter_data(data_current)
         data_cyklo_updated = merge_data(data_db, data_cyklo_current)
         _atomic_write_json(json_db_file_path, data_cyklo_updated, indent=4)
+        if write_cyklo_json_path:
+            _atomic_write_json(write_cyklo_json_path, data_cyklo_updated, indent=4)
+            logger.info("Wrote derived cycling DB to %s.", write_cyklo_json_path)
     else:
         data_updated = merge_data(data_db, data_current["items"])
         _atomic_write_json(json_db_file_path, data_updated, indent=4)
+        if write_cyklo_json_path:
+            data_cyklo_updated = filter_cyklo_items(data_updated)
+            _atomic_write_json(write_cyklo_json_path, data_cyklo_updated, indent=4)
+            logger.info(
+                "Wrote derived cycling DB to %s (%d items).",
+                write_cyklo_json_path,
+                len(data_cyklo_updated),
+            )
 
     logger.info("Merging finished. Output file: %s", json_db_file_path)
 
@@ -379,6 +411,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-filter-cyklo", dest="filter_cyklo", action="store_false")
     parser.add_argument("--restore", action="store_true")
     parser.add_argument("--save_update_data", action="store_true")
+    parser.add_argument("--write-cyklo-json", type=str, default=None)
     parser.add_argument("--anchor-id", type=int, default=None)
     parser.add_argument("--id-window-back", type=int, default=ID_WINDOW_BACK_DEFAULT)
     parser.add_argument("--id-lookahead", type=int, default=ID_LOOKAHEAD_DEFAULT)
@@ -407,6 +440,7 @@ if __name__ == "__main__":
         out_dirname="notebooks",
         filter_cyklo=filter_cyklo,
         save_update_data=args.save_update_data,
+        write_cyklo_json_path=args.write_cyklo_json,
         anchor_id=args.anchor_id,
         id_window_back=args.id_window_back,
         id_lookahead=args.id_lookahead,
