@@ -4,19 +4,17 @@ import json
 import logging
 import os
 import tempfile
-import time
 from datetime import datetime
 
-import requests
 from cyklo_filter import filter_cyklo_items, to_lower_text
-from requests.exceptions import RequestException
+from restore_all import download_one_id
+SCRAPER_IMPORT_ERROR = None
 
 logger = logging.getLogger(__name__)
 CYKLO_DB_FILENAME = "plznito_cyklo.json"
-PLZNITO_LIST_URL = "http://plznito.cz/api/1.0/tickets/list?categoryId=0&statusId=0&arch=0&term=&own=0&term="
-REQUEST_TIMEOUT_SECONDS = 30
-REQUEST_RETRIES = 3
-REQUEST_BACKOFF_SECONDS = 1.0
+ID_WINDOW_BACK_DEFAULT = 100
+ID_LOOKAHEAD_DEFAULT = 200
+SEED_DATA_DIR_DEFAULT = "data"
 
 
 def _load_json_file(file_path):
@@ -37,29 +35,6 @@ def _atomic_write_json(file_path, data, indent=4):
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
-
-
-def _request_with_retries(url, timeout=REQUEST_TIMEOUT_SECONDS, retries=REQUEST_RETRIES):
-    last_exc = None
-    for attempt in range(1, retries + 1):
-        try:
-            response = requests.get(url, timeout=timeout)
-            response.raise_for_status()
-            return response
-        except RequestException as exc:
-            last_exc = exc
-            if attempt == retries:
-                break
-            sleep_for = REQUEST_BACKOFF_SECONDS * (2 ** (attempt - 1))
-            logger.warning(
-                "Request failed (attempt %d/%d): %s. Retrying in %.1fs.",
-                attempt,
-                retries,
-                exc,
-                sleep_for,
-            )
-            time.sleep(sleep_for)
-    raise last_exc
 
 
 def _validate_payload(data):
@@ -118,14 +93,134 @@ def _save_raw_snapshot(data, out_dirname):
     logger.info("Saved raw update snapshot to %s.", snapshot_path)
 
 
-def get_plznito_current_data():
+def _max_record_id(records):
+    max_id = None
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        normalized_id = _normalize_id(record.get("id"))
+        if normalized_id is None:
+            continue
+        if max_id is None or normalized_id > max_id:
+            max_id = normalized_id
+    return max_id
+
+
+def _max_seed_json_id(seed_data_dir):
+    if not seed_data_dir:
+        return None
+    if not os.path.isdir(seed_data_dir):
+        logger.warning("Seed data directory %s does not exist.", seed_data_dir)
+        return None
+
+    max_seed_id = None
+    for fname in os.listdir(seed_data_dir):
+        if not fname.endswith(".json"):
+            continue
+        fname_base = os.path.splitext(fname)[0]
+        if not fname_base.isdigit():
+            continue
+        file_id = int(fname_base)
+        if max_seed_id is None or file_id > max_seed_id:
+            max_seed_id = file_id
+    return max_seed_id
+
+
+def _resolve_anchor_id(existing_records, anchor_id=None, seed_data_dir=SEED_DATA_DIR_DEFAULT):
+    db_anchor = _max_record_id(existing_records)
+    if db_anchor is not None:
+        return db_anchor, "db"
+
+    cli_anchor = _normalize_id(anchor_id)
+    if cli_anchor is not None:
+        return cli_anchor, "cli"
+
+    seed_anchor = _max_seed_json_id(seed_data_dir)
+    if seed_anchor is not None:
+        return seed_anchor, f"seed:{seed_data_dir}"
+
+    raise ValueError(
+        "Unable to resolve crawl anchor id. Provide --anchor-id or place numeric *.json files "
+        f"in {seed_data_dir}."
+    )
+
+
+def _resolve_crawl_range(anchor_id, id_window_back=ID_WINDOW_BACK_DEFAULT, id_lookahead=ID_LOOKAHEAD_DEFAULT):
+    if anchor_id is None:
+        raise ValueError("anchor_id must not be None.")
+    if id_window_back < 0:
+        raise ValueError("id_window_back must be >= 0.")
+    if id_lookahead < 0:
+        raise ValueError("id_lookahead must be >= 0.")
+
+    start_id = max(1, anchor_id - id_window_back)
+    end_id = anchor_id + id_lookahead
+    return start_id, end_id
+
+
+def _extract_item(scraper_output):
+    if not isinstance(scraper_output, dict):
+        return None
+    item = scraper_output.get("item")
+    if not isinstance(item, dict) or not item:
+        return None
+    return item
+
+
+def get_plznito_current_data(
+    existing_records,
+    anchor_id=None,
+    id_window_back=ID_WINDOW_BACK_DEFAULT,
+    id_lookahead=ID_LOOKAHEAD_DEFAULT,
+    seed_data_dir=SEED_DATA_DIR_DEFAULT,
+):
     """
-    Download json with all plzni.to data
+    Build current update payload by scraping web map ticket detail pages.
     """
-    response = _request_with_retries(PLZNITO_LIST_URL)
-    data = response.json()
-    payload = _validate_payload(data)
-    logger.info("Downloaded current plznito json (%d items).", len(payload["items"]))
+    if download_one_id is None:  # pragma: no cover - environment dependent
+        raise RuntimeError(f"Web scraper unavailable: {SCRAPER_IMPORT_ERROR}")
+
+    resolved_anchor, anchor_source = _resolve_anchor_id(
+        existing_records,
+        anchor_id=anchor_id,
+        seed_data_dir=seed_data_dir,
+    )
+    start_id, end_id = _resolve_crawl_range(
+        resolved_anchor,
+        id_window_back=id_window_back,
+        id_lookahead=id_lookahead,
+    )
+
+    items = []
+    empty_items = 0
+    for ticket_id in range(start_id, end_id + 1):
+        try:
+            scraped_data = download_one_id(ticket_id, source="web")
+            logger.info("Downloaded ticket %d via web scraping.", ticket_id)
+        except Exception as exc:  # pragma: no cover - network/runtime dependent
+            logger.warning("Web scrape failed for id %s: %s", ticket_id, exc)
+            empty_items += 1
+            continue
+
+        item = _extract_item(scraped_data)
+        if item is None:
+            empty_items += 1
+            continue
+        items.append(item)
+
+    payload = _validate_payload({"items": items})
+    scanned_count = end_id - start_id + 1
+    logger.info(
+        "Downloaded current plznito payload via web scraping (anchor=%s, source=%s, range=%d-%d, "
+        "scanned=%d, items=%d, empty=%d).",
+        resolved_anchor,
+        anchor_source,
+        start_id,
+        end_id,
+        scanned_count,
+        len(items),
+        empty_items,
+    )
     return payload
 
 
@@ -237,18 +332,33 @@ def db_restore(start_json_name=None, data_dirname="."):
     logger.info("Restore completed: wrote %d items to plznito_cyklo.json.", len(data))
 
 
-def db_update(json_db_file_path, out_dirname="", filter_cyklo=True, save_update_data=False):
+def db_update(
+    json_db_file_path,
+    out_dirname="",
+    filter_cyklo=True,
+    save_update_data=False,
+    anchor_id=None,
+    id_window_back=ID_WINDOW_BACK_DEFAULT,
+    id_lookahead=ID_LOOKAHEAD_DEFAULT,
+    seed_data_dir=SEED_DATA_DIR_DEFAULT,
+):
     """
     update with daily data
     """
+    # add data to our db
+    data_db = _load_db_records(json_db_file_path)
+
     # load new data
-    data_current = get_plznito_current_data()
+    data_current = get_plznito_current_data(
+        data_db,
+        anchor_id=anchor_id,
+        id_window_back=id_window_back,
+        id_lookahead=id_lookahead,
+        seed_data_dir=seed_data_dir,
+    )
 
     if save_update_data:
         _save_raw_snapshot(data_current, out_dirname)
-
-    # add data to our db
-    data_db = _load_db_records(json_db_file_path)
 
     if filter_cyklo:
         data_cyklo_current = filter_data(data_current)
@@ -269,6 +379,10 @@ if __name__ == "__main__":
     parser.add_argument("--no-filter-cyklo", dest="filter_cyklo", action="store_false")
     parser.add_argument("--restore", action="store_true")
     parser.add_argument("--save_update_data", action="store_true")
+    parser.add_argument("--anchor-id", type=int, default=None)
+    parser.add_argument("--id-window-back", type=int, default=ID_WINDOW_BACK_DEFAULT)
+    parser.add_argument("--id-lookahead", type=int, default=ID_LOOKAHEAD_DEFAULT)
+    parser.add_argument("--seed-data-dir", type=str, default=SEED_DATA_DIR_DEFAULT)
     parser.set_defaults(filter_cyklo=None)
     args = parser.parse_args()
 
@@ -293,4 +407,8 @@ if __name__ == "__main__":
         out_dirname="notebooks",
         filter_cyklo=filter_cyklo,
         save_update_data=args.save_update_data,
+        anchor_id=args.anchor_id,
+        id_window_back=args.id_window_back,
+        id_lookahead=args.id_lookahead,
+        seed_data_dir=args.seed_data_dir,
     )

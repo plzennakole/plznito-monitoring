@@ -108,7 +108,7 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
+# mkdocs documentation./
 /site
 
 
@@ -117,3 +117,4 @@ venv.bak/
 *.json
 /app/templates/map.html
 /app/templates/map_all.html
+/app/templates/map_missing.html

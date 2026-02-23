@@ -32,6 +32,12 @@ For updating all tickets:
 python run_db_update.py --db_json plznito_all.json
 ```
 
+`run_db_update.py` now performs live updates using web scraping (map pages) instead of the legacy list API.
+Optional crawl tuning flags:
+```shell
+python run_db_update.py --db_json plznito_cyklo.json --anchor-id 49553 --id-window-back 500 --id-lookahead 300 --seed-data-dir data
+```
+
 For restore-only mode (does not run live update in the same invocation):
 ```shell
 python run_db_update.py --restore --db_json plznito_cyklo.json
