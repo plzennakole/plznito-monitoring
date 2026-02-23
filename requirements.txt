@@ -1,3 +1,9 @@
 flask
+flask-caching
 folium
 requests
+beautifulsoup4
+fake-headers
+tqdm
+simplejson
+json5

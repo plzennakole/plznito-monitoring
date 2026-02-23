@@ -9,6 +9,8 @@ import re
 import json5
 from requests.exceptions import RequestException
 
+from cyklo_filter import filter_cyklo_items
+
 logger = logging.getLogger(__name__)
 
 
@@ -82,16 +84,7 @@ def filter_data(data):
     """
     Simple filtering of cycling items
     """
-    data_cyklo = []
-    for x in data["items"]:
-        if not "report" in x:
-            print(f"report not found in data {x}")
-            continue
-        if "cykl" in x["report"].lower() or "kolob" in x["report"].lower() or "cikli" in x["report"].lower()\
-                or "cyklo" in x["name"].lower() or "kolob" in x["name"].lower():
-            if "recykl" not in x["report"].lower():
-                data_cyklo.append(x)
-    return data_cyklo
+    return filter_cyklo_items(data["items"])
 
 
 if __name__ == "__main__":
@@ -109,7 +102,7 @@ if __name__ == "__main__":
         if os.path.exists(os.path.join(args.data_dir, f"{i}.json")):
             try:
                 data = json.load(open(os.path.join(args.data_dir, f"{i}.json")))
-            except JSONDecodeError:
+            except json.JSONDecodeError:
                 data = {}
             if data == {}:
                 os.remove(os.path.join(args.data_dir, f"{i}.json"))
