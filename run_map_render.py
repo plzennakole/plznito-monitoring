@@ -79,14 +79,27 @@ def _sanitize_photo_url(item):
     if not isinstance(photos, list) or not photos:
         return None
     photo = photos[0]
-    if not isinstance(photo, dict):
-        return None
-    photo_url = photo.get("thumb")
-    if not isinstance(photo_url, str):
-        return None
-    if not photo_url.startswith(("http://", "https://")):
-        return None
-    return photo_url
+
+    # Handle case where photo is a dictionary with "thumb" key
+    if isinstance(photo, dict):
+        photo_url = photo.get("thumb")
+        if not isinstance(photo_url, str):
+            return None
+        if not photo_url.startswith(("http://", "https://")):
+            return None
+        return photo_url
+
+    # Handle case where photo is a string path
+    if isinstance(photo, str):
+        photo_url = photo.strip()
+        if not photo_url:
+            return None
+        # If it's a relative path, prepend the base URL
+        if not photo_url.startswith(("http://", "https://")):
+            photo_url = f"https://www.plznito.cz/{photo_url}"
+        return photo_url
+
+    return None
 
 
 def _status_color(status_id):
@@ -142,7 +155,7 @@ def _normalize_item(item):
 def _build_popup_html(item):
     ticket_id = str(item["id"])
     ticket_id_escaped = escape(ticket_id)
-    ticket_url = f"https://www.plznito.cz/map#!/activity/{quote(ticket_id, safe='')}"
+    ticket_url = f"https://www.plznito.cz/map/{quote(ticket_id, safe='')}"
     name_html = _escape_multiline(item["name"])
     date_html = _escape_multiline(item["date_text"])
     description_html = _escape_multiline(item["description"])
