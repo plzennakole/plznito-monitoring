@@ -13,7 +13,7 @@ from requests.exceptions import RequestException
 
 logger = logging.getLogger(__name__)
 CYKLO_DB_FILENAME = "plznito_cyklo.json"
-PLZNITO_LIST_URL = "http://plzni.to/api/1.0/tickets/list?categoryId=0&statusId=0&arch=0&term=&own=0&term="
+PLZNITO_LIST_URL = "http://plznito.cz/api/1.0/tickets/list?categoryId=0&statusId=0&arch=0&term=&own=0&term="
 REQUEST_TIMEOUT_SECONDS = 30
 REQUEST_RETRIES = 3
 REQUEST_BACKOFF_SECONDS = 1.0

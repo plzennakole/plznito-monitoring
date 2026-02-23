@@ -1,13 +1,11 @@
-import folium
-from folium.plugins import MarkerCluster, Fullscreen
 import json
 import os
 import datetime
 import logging
 import argparse
 import tempfile
+import re
 from collections import Counter
-from html import escape
 from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
@@ -18,6 +16,19 @@ DATE_FORMATS = (
     "%Y-%m-%d %H:%M:%S",
     "%d.%m.%Y",
 )
+RECENT_LAYER_NAME = "Posledních 30 dnů"
+DEFAULT_CENTER = [49.7443392, 13.3766164]
+DEFAULT_ZOOM = 13
+STATUS_COLOR_MAP = {
+    2: "orange",
+    3: "green",
+    6: "lightgreen",
+}
+STATUS_LABEL_MAP = {
+    2: "V řešení",
+    3: "Vyřešeno",
+    6: "Odpovězeno",
+}
 
 
 def _parse_date_value(value):
@@ -102,20 +113,6 @@ def _sanitize_photo_url(item):
     return None
 
 
-def _status_color(status_id):
-    if status_id == 2:
-        return "orange"
-    if status_id == 3:
-        return "green"
-    if status_id == 6:
-        return "lightgreen"
-    return "red"
-
-
-def _escape_multiline(value):
-    return escape("" if value is None else str(value)).replace("\n", "<br>")
-
-
 def _normalize_item(item):
     if not isinstance(item, dict):
         return None, "missing_required_fields"
@@ -152,127 +149,325 @@ def _normalize_item(item):
     return normalized, None
 
 
-def _build_popup_html(item):
+def _item_id_for_skip(item):
+    if not isinstance(item, dict):
+        return None
+    item_id = item.get("id")
+    if item_id is None:
+        return None
+    return str(item_id)
+
+
+def _serialize_marker(item, popup_mode):
     ticket_id = str(item["id"])
-    ticket_id_escaped = escape(ticket_id)
-    ticket_url = f"https://www.plznito.cz/map/{quote(ticket_id, safe='')}"
-    name_html = _escape_multiline(item["name"])
-    date_html = _escape_multiline(item["date_text"])
-    description_html = _escape_multiline(item["description"])
-    solution_html = _escape_multiline(item["solution"])
+    marker_data = {
+        "id": ticket_id,
+        "status_id": item["status_id"],
+        "name": "" if item["name"] is None else str(item["name"]),
+        "date_text": item["date_text"],
+        "lat": item["latitude"],
+        "lon": item["longitude"],
+        "ticket_url": f"https://www.plznito.cz/map/{quote(ticket_id, safe='')}",
+    }
 
-    popup_html = (
-        f"<b>{name_html} "
-        f"(<a href='{ticket_url}' target='_blank'>{ticket_id_escaped}</a>)</b><br>"
-        f"{date_html}<br>{description_html}<br><br>{solution_html}<br>"
-    )
+    if popup_mode == "full":
+        marker_data["description"] = "" if item["description"] is None else str(item["description"])
+        marker_data["solution"] = "" if item["solution"] is None else str(item["solution"])
+        marker_data["photo_url"] = item["photo_url"]
 
-    if item["photo_url"] is not None:
-        popup_html += f"<img src='{escape(item['photo_url'], quote=True)}'>"
-
-    return popup_html
-
-
-def _make_layer(name, cluster=False, show=False):
-    feature_group = folium.FeatureGroup(name=str(name), show=show)
-    marker_target = feature_group
-    if cluster:
-        marker_target = MarkerCluster(name=str(name)).add_to(feature_group)
-    return feature_group, marker_target
+    return marker_data
 
 
-def get_map(data_current, cluster=False):
-    m = folium.Map(location=[49.7443392, 13.3766164], zoom_start=13, control_scale=True)
+def serialize_map_data(data_current, popup_mode="compact", now=None):
+    if popup_mode not in {"compact", "full"}:
+        raise ValueError("popup_mode must be 'compact' or 'full'.")
 
-    year_layers = {}
-    year_targets = {}
-    this_day = datetime.datetime.now()
-    last_30_layer, last_30_target = _make_layer("Posledních 30 dnů", cluster=cluster, show=True)
+    if now is None:
+        now = datetime.datetime.now()
 
+    recent_cutoff = now - datetime.timedelta(days=30)
     stats = Counter()
-    stats["input_records"] = len(data_current)
+    markers = []
+    skipped = []
+    years = set()
 
     for item in data_current:
+        stats["input_records"] += 1
+
         normalized_item, error_reason = _normalize_item(item)
         if error_reason is not None:
             stats[f"skipped_{error_reason}"] += 1
+            skipped.append({"id": _item_id_for_skip(item), "reason": error_reason})
             logger.debug("Skipping record due to %s: %r", error_reason, item)
             continue
 
-        popup_html = _build_popup_html(normalized_item)
-        popup = folium.Popup(popup_html, max_width=300, min_width=300)
-        marker = folium.Marker(
-            location=[normalized_item["latitude"], normalized_item["longitude"]],
-            popup=popup,
-            icon=folium.Icon(color=_status_color(normalized_item["status_id"]), icon="ok-sign"),
-        )
+        marker_data = _serialize_marker(normalized_item, popup_mode=popup_mode)
 
-        if this_day - datetime.timedelta(days=30) < normalized_item["date_obj"]:
-            marker.add_to(last_30_target)
+        if normalized_item["date_obj"] > recent_cutoff:
+            marker_data["layer"] = "recent"
             stats["added_last_30_days"] += 1
         else:
             year = normalized_item["date_obj"].year
-            if year not in year_targets:
-                year_layer, year_target = _make_layer(str(year), cluster=cluster, show=False)
-                year_layers[year] = year_layer
-                year_targets[year] = year_target
-            marker.add_to(year_targets[year])
+            marker_data["layer"] = str(year)
+            years.add(year)
             stats["added_year_layer"] += 1
 
-    last_30_layer.add_to(m)
-    for year in sorted(year_layers):
-        year_layers[year].add_to(m)
-    folium.LayerControl(collapsed=False).add_to(m)
+        markers.append(marker_data)
+
+    stats["valid_rendered"] = len(markers)
+    stats["skipped_total"] = stats["input_records"] - stats["valid_rendered"]
+
+    return {
+        "markers": markers,
+        "years": sorted(years),
+        "skipped": skipped,
+        "stats": stats,
+        "popup_mode": popup_mode,
+    }
+
+
+def _json_for_inline_script(data):
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+
+
+def _minify_html(html_text):
+    block_pattern = re.compile(r"(?is)<(script|style|pre|textarea)\b.*?</\1>")
+    preserved_blocks = []
+
+    def _preserve_block(match):
+        block_id = len(preserved_blocks)
+        preserved_blocks.append(match.group(0))
+        return f"__HTML_MINIFY_BLOCK_{block_id}__"
+
+    minified = block_pattern.sub(_preserve_block, html_text)
+    minified = re.sub(r"<!--(?!\s*\[if).*?-->", "", minified, flags=re.DOTALL)
+    minified = re.sub(r">\s+<", "><", minified)
+    minified = minified.strip()
+
+    for block_id, block_text in enumerate(preserved_blocks):
+        minified = minified.replace(f"__HTML_MINIFY_BLOCK_{block_id}__", block_text)
+
+    return minified
+
+
+def _build_map_html(serialized_data, cluster=False):
+    markers_json = _json_for_inline_script(serialized_data["markers"])
+    years_json = _json_for_inline_script(serialized_data["years"])
+    popup_mode_json = _json_for_inline_script(serialized_data["popup_mode"])
+    status_colors_json = _json_for_inline_script({str(key): value for key, value in STATUS_COLOR_MAP.items()})
+    status_labels_json = _json_for_inline_script({str(key): value for key, value in STATUS_LABEL_MAP.items()})
+    use_cluster = "true" if cluster else "false"
+    recent_layer_json = _json_for_inline_script(RECENT_LAYER_NAME)
+
+    return f"""<!-- Generated by run_map_render.py -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.6.3/css/font-awesome.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/MarkerCluster.Default.css">
+<style>
+  #plznito-map-wrapper {{
+    position: relative;
+  }}
+  #plznito-map {{
+    width: 100%;
+    min-height: 520px;
+    height: calc(100vh - 32px);
+  }}
+  .plznito-overlay {{
+    position: fixed;
+    z-index: 9999;
+    background: #fff;
+    border: 2px solid #808080;
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 13px;
+    line-height: 1.3;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }}
+  #plznito-legend {{
+    top: 50px;
+    left: 50px;
+    width: 215px;
+  }}
+  .plznito-dot {{
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    margin-right: 6px;
+  }}
+  .leaflet-popup-content {{
+    font-size: 12px;
+  }}
+  @media (max-width: 860px) {{
+    #plznito-map {{
+      min-height: 420px;
+      height: 72vh;
+    }}
+    #plznito-legend {{
+      position: static;
+      width: auto;
+      margin: 8px 0;
+    }}
+  }}
+</style>
+<div id="plznito-map-wrapper">
+  <div id="plznito-map"></div>
+  <div id="plznito-legend" class="plznito-overlay">
+    <strong>Legenda</strong><br>
+    <span class="plznito-dot" style="background: green;"></span>Vyřešeno<br>
+    <span class="plznito-dot" style="background: lightgreen;"></span>Odpovězeno<br>
+    <span class="plznito-dot" style="background: orange;"></span>V řešení<br>
+    <span class="plznito-dot" style="background: red;"></span>Odmítnuto / nevyřešeno
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.1.0/leaflet.markercluster.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"></script>
+<script>
+(function () {{
+  const markers = {markers_json};
+  const years = {years_json};
+  const popupMode = {popup_mode_json};
+  const useCluster = {use_cluster};
+  const recentLayerName = {recent_layer_json};
+
+  const statusColors = {status_colors_json};
+  const statusLabels = {status_labels_json};
+
+  function colorForStatus(statusId) {{
+    return statusColors[String(statusId)] || "red";
+  }}
+
+  function labelForStatus(statusId) {{
+    return statusLabels[String(statusId)] || "Odmítnuto / nevyřešeno";
+  }}
+
+  function escapeHtml(value) {{
+    const text = value === null || value === undefined ? "" : String(value);
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }}
+
+  function escapeMultiline(value) {{
+    return escapeHtml(value).replace(/\\n/g, "<br>");
+  }}
+
+  function makeLayer(map, showByDefault) {{
+    let visibleLayer;
+    let markerTarget;
+    if (useCluster) {{
+      visibleLayer = L.featureGroup();
+      markerTarget = L.markerClusterGroup();
+      visibleLayer.addLayer(markerTarget);
+    }} else {{
+      visibleLayer = L.layerGroup();
+      markerTarget = visibleLayer;
+    }}
+    if (showByDefault) {{
+      visibleLayer.addTo(map);
+    }}
+    return {{ visibleLayer: visibleLayer, markerTarget: markerTarget }};
+  }}
+
+  function buildPopupContent(marker) {{
+    let popupHtml =
+      "<b>" + escapeMultiline(marker.name) + " " +
+      "(<a href='" + escapeHtml(marker.ticket_url) + "' target='_blank' rel='noopener noreferrer'>" +
+      escapeHtml(marker.id) + "</a>)</b><br>" +
+      escapeMultiline(marker.date_text) + "<br>" +
+      escapeHtml(labelForStatus(marker.status_id));
+
+    if (popupMode === "full") {{
+      popupHtml += "<br>" + escapeMultiline(marker.description || "");
+
+      if ((marker.solution || "").trim()) {{
+        popupHtml += "<br><br>" + escapeMultiline(marker.solution);
+      }}
+
+      if (marker.photo_url) {{
+        popupHtml += "<br><img src='" + escapeHtml(marker.photo_url) + "'>";
+      }}
+    }}
+    return popupHtml;
+  }}
+
+  if (!window.L) {{
+    throw new Error("Leaflet library is not available.");
+  }}
+
+  const map = L.map("plznito-map", {{ zoomControl: true }}).setView({DEFAULT_CENTER}, {DEFAULT_ZOOM});
+  L.control.scale().addTo(map);
+  L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
+    attribution: "Data by &copy; <a href='http://openstreetmap.org'>OpenStreetMap</a>, under <a href='http://www.openstreetmap.org/copyright'>ODbL</a>.",
+    maxZoom: 18
+  }}).addTo(map);
+
+  const overlays = {{}};
+  const markerTargets = {{}};
+  const recentLayer = makeLayer(map, true);
+  overlays[recentLayerName] = recentLayer.visibleLayer;
+  markerTargets[recentLayerName] = recentLayer.markerTarget;
+
+  years.forEach(function (year) {{
+    const layerName = String(year);
+    const yearLayer = makeLayer(map, false);
+    overlays[layerName] = yearLayer.visibleLayer;
+    markerTargets[layerName] = yearLayer.markerTarget;
+  }});
+
+  markers.forEach(function (marker) {{
+    const layerName = marker.layer === "recent" ? recentLayerName : String(marker.layer);
+    const markerTarget = markerTargets[layerName] || markerTargets[recentLayerName];
+    const markerIcon = L.AwesomeMarkers.icon({{
+      icon: "ok-sign",
+      prefix: "glyphicon",
+      iconColor: "white",
+      markerColor: colorForStatus(marker.status_id)
+    }});
+    const markerObj = L.marker([marker.lat, marker.lon], {{ icon: markerIcon }});
+    markerObj.bindPopup(buildPopupContent(marker), {{ maxWidth: 300, minWidth: 300 }});
+    markerObj.addTo(markerTarget);
+  }});
+
+  L.control.layers(null, overlays, {{ collapsed: false }}).addTo(map);
+}})();
+</script>
+"""
+
+
+def get_map(data_current, cluster=False, popup_mode="compact"):
+    serialized_data = serialize_map_data(data_current, popup_mode=popup_mode)
+    stats = serialized_data["stats"]
 
     logger.info(
         (
-            "Map processing summary: input=%d, added_last_30=%d, added_year_layer=%d, "
-            "skipped_missing_required_fields=%d, skipped_invalid_date=%d, skipped_invalid_coordinates=%d."
+            "Map processing summary: input=%d, valid_rendered=%d, added_last_30=%d, "
+            "added_year_layer=%d, skipped_total=%d, skipped_missing_required_fields=%d, "
+            "skipped_invalid_date=%d, skipped_invalid_coordinates=%d."
         ),
         stats["input_records"],
+        stats["valid_rendered"],
         stats["added_last_30_days"],
         stats["added_year_layer"],
+        stats["skipped_total"],
         stats["skipped_missing_required_fields"],
         stats["skipped_invalid_date"],
         stats["skipped_invalid_coordinates"],
     )
 
-    legend_html = '''
-         <div style="position: fixed; 
-         top: 50px; left: 50px; width: 140px; height: 160px; 
-         border:2px solid grey; z-index:9999; font-size:14px;
-         ">&nbsp; Legenda <br>
-         &nbsp; Vyřešeno &nbsp; <i class="fa fa-map-marker fa-2x"
-                      style="color:green"></i><br>
-         &nbsp; Odpovězeno &nbsp; <i class="fa fa-map-marker fa-2x"
-                      style="color:lightgreen"></i><br>
-         &nbsp; V řešení &nbsp; <i class="fa fa-map-marker fa-2x"
-                      style="color:orange"></i><br>
-         &nbsp; Odmítnuto / nevyřešeno  &nbsp; <i class="fa fa-map-marker fa-2x"
-                      style="color:red"></i>
-          </div>
-         '''
-    m.get_root().html.add_child(folium.Element(legend_html))
-
-    # plus_button_html = '''<a href="#" class="w3-button w3-large w3-circle w3-green w3-ripple" style="position: fixed;
-    #     top: 50px; left: 50px; z-index:9999;">+</a>'''
-    # m.get_root().html.add_child(folium.Element(plus_button_html))
-    # plus overlay form to get new points to map
-    # https://morioh.com/p/f23f87a146b4
-
-    Fullscreen(position='topright',  # ‘topleft’, default=‘topright’, ‘bottomleft’, ‘bottomright’
-               title='FULL SCREEN ON',
-               title_cancel='FULL SCREEN OFF',
-               force_separate_button=True
-               ).add_to(m)
-
-    return m
-
-    # heatmap: https://autogis-site.readthedocs.io/en/latest/notebooks/L5/02_interactive-map-folium.html#heatmap
+    return _build_map_html(serialized_data, cluster=cluster)
 
 
 def render_map_to_file(file_in="plznito_cyklo.json", file_out="app/templates/map.html",
-                       cluster=False):
+                       cluster=False, popup_mode="compact"):
     logger.info("Loading data from %s", file_in)
     with open(file_in, encoding="utf-8") as fr:
         data = json.load(fr)
@@ -285,7 +480,8 @@ def render_map_to_file(file_in="plznito_cyklo.json", file_out="app/templates/map
         raise ValueError("Input JSON must be a list of records or an object with an 'items' list.")
 
     logger.info("Rendering map from %d records", len(data_records))
-    map_obj = get_map(data_records, cluster=cluster)
+    map_html = get_map(data_records, cluster=cluster, popup_mode=popup_mode)
+    map_html = _minify_html(map_html)
 
     target_dir = os.path.dirname(os.path.abspath(file_out))
     os.makedirs(target_dir, exist_ok=True)
@@ -294,7 +490,8 @@ def render_map_to_file(file_in="plznito_cyklo.json", file_out="app/templates/map
     fd, temp_path = tempfile.mkstemp(prefix=".tmp_map_", suffix=".html", dir=target_dir)
     os.close(fd)
     try:
-        map_obj.save(temp_path)
+        with open(temp_path, "w", encoding="utf-8") as fw:
+            fw.write(map_html)
         os.replace(temp_path, file_out)
     finally:
         if temp_path and os.path.exists(temp_path):
@@ -310,6 +507,7 @@ if __name__ == '__main__':
     parser.add_argument("--file_in", type=str, default="plznito_cyklo.json")
     parser.add_argument("--file_out", type=str, default="app/templates/map.html")
     parser.add_argument("--cluster_style", action="store_true")
+    parser.add_argument("--popup_mode", type=str, default="compact", choices=["compact", "full"])
     args = parser.parse_args()
 
     log_level = getattr(logging, args.log_level.upper(), logging.INFO)
@@ -318,4 +516,4 @@ if __name__ == '__main__':
                         format='%(asctime)s %(message)s')
     logger.setLevel(log_level)
 
-    render_map_to_file(args.file_in, args.file_out, cluster=args.cluster_style)
+    render_map_to_file(args.file_in, args.file_out, cluster=args.cluster_style, popup_mode=args.popup_mode)

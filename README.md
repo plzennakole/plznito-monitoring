@@ -41,11 +41,15 @@ Render maps after data updates:
 ```shell
 python run_map_render.py --file_in plznito_cyklo.json --file_out app/templates/map.html
 python run_map_render.py --cluster_style --file_in plznito_all.json --file_out app/templates/map_all.html
+# optional: keep full popup text payload (larger output)
+python run_map_render.py --cluster_style --popup_mode full --file_in plznito_all.json --file_out app/templates/map_all.html
 ```
 
 Pipeline behavior notes:
 - Update and render scripts skip malformed records and log summary counts instead of crashing.
 - Map renderer accepts both `created.date` and fallback `date` fields in ticket JSON.
+- Map renderer uses compact popups by default (`--popup_mode compact`) to keep HTML output smaller and faster.
+- Invalid/unmappable records are not rendered as markers and are reported in map processing logs.
 
 For adding to cron, open crontab:
 ```shell
