@@ -13,6 +13,15 @@ logging.basicConfig(filename='plznito_monitoring.log',
                     level=logging.INFO,
                     format='%(asctime)s %(message)s')
 
+@app.after_request
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"] = CORS_ALLOW_ORIGIN
+    response.headers["Access-Control-Allow-Methods"] = CORS_ALLOW_METHODS
+    response.headers["Access-Control-Allow-Headers"] = CORS_ALLOW_HEADERS
+    response.headers["Access-Control-Max-Age"] = CORS_MAX_AGE
+    response.headers["Vary"] = "Origin"
+    return response
+
 cache = Cache(app, config={'CACHE_TYPE': 'simple'})
 
 
