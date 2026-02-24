@@ -107,7 +107,7 @@ def _sanitize_photo_url(item):
             return None
         # If it's a relative path, prepend the base URL
         if not photo_url.startswith(("http://", "https://")):
-            photo_url = f"https://www.plznito.cz/{photo_url}"
+            photo_url = f"https://tf-prod-plznito-web.s3.eu-central-1.amazonaws.com/{photo_url}"
         return photo_url
 
     return None
@@ -302,6 +302,16 @@ def _build_map_html(serialized_data, cluster=False):
   .leaflet-popup-content {{
     font-size: 12px;
   }}
+  .leaflet-popup-content .plznito-popup-photo {{
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    max-height: 180px;
+    height: auto;
+    margin-top: 6px;
+    border-radius: 4px;
+    object-fit: contain;
+  }}
   @media (max-width: 860px) {{
     #plznito-map {{
       min-height: 420px;
@@ -393,7 +403,10 @@ def _build_map_html(serialized_data, cluster=False):
       }}
 
       if (marker.photo_url) {{
-        popupHtml += "<br><img src='" + escapeHtml(marker.photo_url) + "'>";
+        popupHtml +=
+          "<br><img class='plznito-popup-photo' src='" +
+          escapeHtml(marker.photo_url) +
+          "' alt='Fotografie hlášení'>";
       }}
     }}
     return popupHtml;
