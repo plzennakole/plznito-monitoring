@@ -9,6 +9,12 @@ from app import app
 
 logger = logging.getLogger(__name__)
 
+# CORS Configuration
+CORS_ALLOW_ORIGIN = "*"
+CORS_ALLOW_METHODS = "GET, POST, OPTIONS"
+CORS_ALLOW_HEADERS = "Content-Type"
+CORS_MAX_AGE = "3600"
+
 logging.basicConfig(filename='plznito_monitoring.log',
                     level=logging.INFO,
                     format='%(asctime)s %(message)s')
