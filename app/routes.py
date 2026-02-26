@@ -1,7 +1,7 @@
 import os
 
 from dotenv import load_dotenv
-from flask import jsonify, request
+from flask import jsonify, request, render_template
 from flask_caching import Cache
 
 from app import app
@@ -44,6 +44,13 @@ def add_cors_headers(response):
     response.headers["Vary"] = "Origin"
     return response
 
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/plznito_map_all')
+def plznito_map_all():
+    return render_template('index_map_all.html')
 
 @app.route('/train_delays/', methods=['GET', 'OPTIONS'])
 @cache.cached()
