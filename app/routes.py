@@ -1,7 +1,9 @@
 import os
 
 from dotenv import load_dotenv
-from flask import jsonify, request, render_template
+import pathlib
+
+from flask import jsonify, request, render_template, send_file
 from flask_caching import Cache
 
 from app import app
@@ -62,5 +64,10 @@ def get_delays():
     delays = {**delays_r, **delays_os}
     return jsonify(delays)
 
+
+@app.route('/bikecounters', methods=['GET', 'POST'])
+def get_bikecounters():
+    html_path = pathlib.Path(__file__).parent.parent / "bikecounters" / "cyklo-counter.html"
+    return send_file(html_path)
 
 application = app
