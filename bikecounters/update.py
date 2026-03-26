@@ -28,6 +28,7 @@ from pathlib import Path
 # ── Config ─────────────────────────────────────────────────────────────────────
 
 XLSX_URL   = "https://opendata.plzen.eu/public/opendata/dataset/198"
+XLSX_URL   = "https://opendata.plzen.eu/public/opendata/ecocounter-traffic"
 SCRIPT_DIR = Path(__file__).parent
 TEMPLATE   = SCRIPT_DIR / "template.html"
 OUTPUT     = SCRIPT_DIR / "cyklo-counter.html"
@@ -84,6 +85,12 @@ def xlsx_to_csv(xlsx_bytes: bytes) -> str:
     except ImportError:
         log.error("'openpyxl' not installed. Run: pip install openpyxl")
         sys.exit(1)
+
+    # if already csv return
+    log.info("Checking if input is already CSV...")
+    log.info("XLSX bytes: %s", xlsx_bytes[:100])
+    if xlsx_bytes.startswith(b"\xef\xbb\xbfid"):
+        return xlsx_bytes.decode("utf-8")
 
     wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
     ws = wb.active
