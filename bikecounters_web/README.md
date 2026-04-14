@@ -88,10 +88,10 @@ db.commit()
 
 | Endpoint | Response |
 |---|---|
-| `GET /api/nav` | Navigation tree for sidebar |
-| `GET /api/location/<loc_id>` | Location metadata + collector list |
-| `GET /api/daily/<loc_id>` | All daily totals (combined + per-collector) |
-| `GET /api/weather` | All weather days `{date: {t, p}}` |
+| `GET /bikecounters/api/nav` | Navigation tree for sidebar |
+| `GET /bikecounters/api/location/<loc_id>` | Location metadata + collector list |
+| `GET /bikecounters/api/daily/<loc_id>` | All daily totals (combined + per-collector) |
+| `GET /bikecounters/api/weather` | All weather days `{date: {t, p}}` |
 
 ## Troubleshooting
 
