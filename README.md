@@ -76,5 +76,3 @@ Append entries for updates every midnight or every 6h:
 ```shell
 python run_flask.py --configs config.json
 ```
-
-(c) Plzen na kole 2021

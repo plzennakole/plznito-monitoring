@@ -118,3 +118,4 @@ venv.bak/
 /app/templates/map.html
 /app/templates/map_all.html
 /app/templates/map_missing.html
+/bikecounters_web/cyklo.db

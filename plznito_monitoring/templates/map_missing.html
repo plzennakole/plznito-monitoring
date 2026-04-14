@@ -1,0 +1,11 @@
+{% extends "layout.html" %}
+{% block title %}Missing generated map{% endblock %}
+{% block head %} {{ super() }} {% endblock %}
+{% block body %}
+<div class="w3-container" style="margin-top: 24px;">
+    <h2>Generated map file is missing</h2>
+    <p>File <code>{{ map_name }}</code> was not found in <code>app/templates</code>.</p>
+    <p>Generate it with:</p>
+    <pre><code>{{ generate_command }}</code></pre>
+</div>
+{% endblock %}

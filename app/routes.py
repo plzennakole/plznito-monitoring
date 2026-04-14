@@ -9,6 +9,7 @@ from flask import jsonify, request, render_template, abort, Response
 from flask_caching import Cache
 
 _BW_DIR = pathlib.Path(__file__).parent.parent / "bikecounters_web"
+_PLZNITO_DIR = pathlib.Path(__file__).parent.parent / "plznito_monitoring"
 sys.path.insert(0, str(_BW_DIR))
 import config as bw_cfg
 
@@ -80,11 +81,11 @@ def root():
 
 @app.route('/plznito/map-bike')
 def index():
-    return render_template('index.html')
+    return render_template('plznito_index.html')
 
 @app.route('/plznito/map-all')
 def plznito_map_all():
-    return render_template('plznito_map_all.html')
+    return render_template('plznito_full_map_index.html')
 
 @app.route('/train_delays/', methods=['GET', 'OPTIONS'])
 @cache.cached()
