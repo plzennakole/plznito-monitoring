@@ -9,41 +9,25 @@ and camera-based detectors from the Plzeň open data portal, with ČHMÚ weather
 |---|---|
 | `config.py` | Location definitions, collector mappings, colors |
 | `ingest.py` | Downloads all data sources → SQLite (`cyklo.db`) |
-| `app.py` | Flask web server + JSON API |
 | `templates/index.html` | Single-page frontend (Chart.js) |
 | `run_update.sh` | Cron-friendly ingest wrapper |
 
-## Setup
-
-```bash
-pip install flask requests
-```
+The Flask routes for this module live in the main app (`app/routes.py`).
+See the top-level README for how to run the server.
 
 ## First run
 
 ```bash
 # Download all data and build the database
+cd bikecounters_web
 python3 ingest.py
-
-# Start the web server (dev)
-python3 app.py --debug
-# → http://127.0.0.1:5000
 ```
 
-## Production (gunicorn + nginx)
+Then start the main server from the repo root:
 
 ```bash
-pip install gunicorn
-gunicorn -w 2 -b 127.0.0.1:5000 app:app
-```
-
-Nginx config:
-```nginx
-location / {
-    proxy_pass http://127.0.0.1:5000;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-}
+python run_flask.py
+# → http://127.0.0.1:5000/bikecounters
 ```
 
 ## Cron setup
@@ -88,10 +72,11 @@ db.commit()
 
 | Endpoint | Response |
 |---|---|
-| `GET /api/nav` | Navigation tree for sidebar |
-| `GET /api/location/<loc_id>` | Location metadata + collector list |
-| `GET /api/daily/<loc_id>` | All daily totals (combined + per-collector) |
-| `GET /api/weather` | All weather days `{date: {t, p}}` |
+| `GET /bikecounters` | Single-page app |
+| `GET /bikecounters/api/nav` | Navigation tree for sidebar |
+| `GET /bikecounters/api/location/<loc_id>` | Location metadata + collector list |
+| `GET /bikecounters/api/daily/<loc_id>` | All daily totals (combined + per-collector) |
+| `GET /bikecounters/api/weather` | All weather days `{date: {t, p}}` |
 
 ## Troubleshooting
 
