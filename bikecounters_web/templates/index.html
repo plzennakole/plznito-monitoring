@@ -415,7 +415,7 @@ async function apiFetch(url) {
 
 // ── Nav ────────────────────────────────────────────────────────────────────────
 async function loadNav() {
-  navData = await apiFetch('/api/nav');
+  navData = await apiFetch('/bikecounters/api/nav');
   renderNav();
 }
 
@@ -500,8 +500,8 @@ async function selectLocation(locId) {
   renderSkeleton();
   try {
     const [locMeta, data] = await Promise.all([
-      apiFetch(`/api/location/${locId}`),
-      apiFetch(`/api/daily/${locId}`),
+      apiFetch(`/bikecounters/api/location/${locId}`),
+      apiFetch(`/bikecounters/api/daily/${locId}`),
     ]);
     currentLoc  = locMeta;
     currentData = data;
@@ -869,7 +869,7 @@ function setDirection(combined) {
 // ── Boot ───────────────────────────────────────────────────────────────────────
 (async () => {
   // Load weather once, silently
-  apiFetch('/api/weather')
+  apiFetch('/bikecounters/api/weather')
     .then(d => { weatherData = d; })
     .catch(() => {});
 
