@@ -47,12 +47,17 @@ def add_cors_headers(response):
     return response
 
 @app.route('/')
+def root():
+    # show in simple way all api endpoints
+    return
+
+@app.route('/plznito/map-bike')
 def index():
     return render_template('index.html')
 
-@app.route('/plznito_map_all')
+@app.route('/plznito/map-all')
 def plznito_map_all():
-    return render_template('index_map_all.html')
+    return render_template('plznito_map_all.html')
 
 @app.route('/train_delays/', methods=['GET', 'OPTIONS'])
 @cache.cached()
