@@ -47,10 +47,9 @@ cache = Cache(app, config={"CACHE_TYPE": "simple", "CACHE_DEFAULT_TIMEOUT": CACH
 
 
 def query(sql, params=()):
-    db = sqlite3.connect(bw_cfg.DB_PATH)
-    db.row_factory = sqlite3.Row
-    rows = db.execute(sql, params).fetchall()
-    db.close()
+    with sqlite3.connect(bw_cfg.DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        rows = db.execute(sql, params).fetchall()
     return [dict(r) for r in rows]
 
 
