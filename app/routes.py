@@ -1,6 +1,6 @@
+import importlib.util
 import os
 import sqlite3
-import sys
 
 from dotenv import load_dotenv
 import pathlib
@@ -11,8 +11,10 @@ from flask_caching import Cache
 
 _BW_DIR = pathlib.Path(__file__).parent.parent / "bikecounters_web"
 _PLZNITO_DIR = pathlib.Path(__file__).parent.parent / "plznito_monitoring"
-sys.path.insert(0, str(_BW_DIR))
-import config as bw_cfg
+
+_spec = importlib.util.spec_from_file_location("bikecounters_web.config", _BW_DIR / "config.py")
+bw_cfg = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(bw_cfg)
 
 from app import app
 from app.train_delays import scrape_babitron_delays
