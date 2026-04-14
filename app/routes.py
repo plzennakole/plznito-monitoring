@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import pathlib
 
 from flask import jsonify, request, render_template, abort, Response
+from jinja2 import TemplateNotFound
 from flask_caching import Cache
 
 _BW_DIR = pathlib.Path(__file__).parent.parent / "bikecounters_web"
@@ -81,11 +82,26 @@ def root():
 
 @app.route('/plznito/map-bike')
 def index():
-    return render_template('plznito_index.html')
+    try:
+        return render_template('plznito_index.html')
+    except TemplateNotFound:
+        return render_template('map_missing.html',
+            map_name='plznito_map.html',
+            generate_command='cd plznito_monitoring && python run_map_render.py'
+                             ' --file_in plznito_cyklo.json'
+                             ' --file_out templates/plznito_map.html'), 503
 
 @app.route('/plznito/map-all')
 def plznito_map_all():
-    return render_template('plznito_full_map_index.html')
+    try:
+        return render_template('plznito_full_map_index.html')
+    except TemplateNotFound:
+        return render_template('map_missing.html',
+            map_name='plznito_map_all.html',
+            generate_command='cd plznito_monitoring && python run_map_render.py'
+                             ' --cluster_style --popup_mode full'
+                             ' --file_in plznito_all.json'
+                             ' --file_out templates/plznito_map_all.html'), 503
 
 @app.route('/train_delays/', methods=['GET', 'OPTIONS'])
 @cache.cached()
