@@ -10,7 +10,6 @@ from jinja2 import TemplateNotFound
 from flask_caching import Cache
 
 _BW_DIR = pathlib.Path(__file__).parent.parent / "bikecounters_web"
-_PLZNITO_DIR = pathlib.Path(__file__).parent.parent / "plznito_monitoring"
 
 _spec = importlib.util.spec_from_file_location("bikecounters_web.config", _BW_DIR / "config.py")
 bw_cfg = importlib.util.module_from_spec(_spec)
