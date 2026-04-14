@@ -10,7 +10,6 @@ from jinja2 import TemplateNotFound
 from flask_caching import Cache
 
 _BW_DIR = pathlib.Path(__file__).parent.parent / "bikecounters_web"
-_PLZNITO_DIR = pathlib.Path(__file__).parent.parent / "plznito_monitoring"
 
 _spec = importlib.util.spec_from_file_location("bikecounters_web.config", _BW_DIR / "config.py")
 bw_cfg = importlib.util.module_from_spec(_spec)
@@ -48,10 +47,9 @@ cache = Cache(app, config={"CACHE_TYPE": "simple", "CACHE_DEFAULT_TIMEOUT": CACH
 
 
 def query(sql, params=()):
-    db = sqlite3.connect(bw_cfg.DB_PATH)
-    db.row_factory = sqlite3.Row
-    rows = db.execute(sql, params).fetchall()
-    db.close()
+    with sqlite3.connect(bw_cfg.DB_PATH) as db:
+        db.row_factory = sqlite3.Row
+        rows = db.execute(sql, params).fetchall()
     return [dict(r) for r in rows]
 
 
