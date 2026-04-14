@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cyklo-počítadla Plzeň</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg:        #0d1117;
+  --surface:   #161b22;
+  --surface2:  #1c2128;
+  --border:    #21262d;
+  --border2:   #30363d;
+  --green:     #39d353;
+  --green-dim: #1a6629;
+  --amber:     #e3b341;
+  --blue:      #58a6ff;
+  --muted:     #6e7681;
+  --text:      #e6edf3;
+  --text-soft: #8b949e;
+  --radius:    10px;
+  --nav-w:     240px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  min-height: 100vh;
+  display: flex;
+}
+
+/* ── Sidebar ── */
+#sidebar {
+  width: var(--nav-w);
+  min-width: var(--nav-w);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow-y: auto;
+}
+.sidebar-logo {
+  padding: 1.25rem 1rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-logo h1 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.4rem;
+  letter-spacing: 0.12em;
+  color: var(--text);
+  line-height: 1;
+}
+.sidebar-logo h1 span { color: var(--green); }
+.sidebar-logo p {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.6rem;
+  color: var(--muted);
+  margin-top: 3px;
+  letter-spacing: 0.05em;
+}
+.nav-section {
+  padding: 1rem 1rem 0.3rem;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 1rem;
+  font-size: 0.82rem;
+  color: var(--text-soft);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: all 0.12s;
+  user-select: none;
+}
+.nav-item:hover { background: var(--surface2); color: var(--text); }
+.nav-item.active { color: var(--text); border-left-color: var(--item-color, var(--green)); background: var(--surface2); }
+.nav-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--item-color, var(--muted));
+}
+.nav-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-soft);
+  cursor: pointer;
+  transition: all 0.12s;
+  user-select: none;
+}
+.nav-group-header:hover { background: var(--surface2); color: var(--text); }
+.nav-group-chevron { margin-left: auto; font-size: 0.6rem; transition: transform 0.15s; }
+.nav-group-header.open .nav-group-chevron { transform: rotate(90deg); }
+.nav-subitem { padding-left: 2rem; }
+.nav-group-children { overflow: hidden; }
+.nav-group-children.collapsed { display: none; }
+
+/* ── Main content ── */
+#main {
+  flex: 1;
+  min-width: 0;
+  padding: 2rem;
+  max-width: 1100px;
+}
+.content-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+.content-header h2 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 2rem;
+  letter-spacing: 0.1em;
+  color: var(--text);
+  line-height: 1;
+}
+.content-header .source-badge {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
+/* ── Stat cards ── */
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.2rem;
+}
+.stat-card-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-soft);
+  font-weight: 500;
+}
+.stat-card-period {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.stat-card-value {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 2rem;
+  letter-spacing: 0.06em;
+  color: var(--green);
+  line-height: 1.1;
+  margin-top: 4px;
+}
+.stat-card-value.dim { color: var(--text-soft); }
+.stat-card-chips {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-soft);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.chip-dot { width: 5px; height: 5px; border-radius: 50%; }
+
+/* ── Chart section ── */
+.chart-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.chart-head {
+  padding: 0.9rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.chart-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1rem;
+  letter-spacing: 0.09em;
+  color: var(--text);
+  margin-right: auto;
+}
+.ctrl-group { display: flex; gap: 3px; align-items: center; }
+.ctrl-divider { width: 1px; height: 20px; background: var(--border2); }
+.btn {
+  background: none;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  color: var(--text-soft);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.7rem;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 0.12s;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.btn:hover { border-color: var(--green-dim); color: var(--green); }
+.btn.active {
+  background: var(--green-dim);
+  border-color: var(--green);
+  color: var(--green);
+  font-weight: 500;
+}
+.btn.amber:hover  { border-color: var(--amber); color: var(--amber); }
+.btn.amber.active { background: color-mix(in srgb, var(--amber) 15%, transparent); border-color: var(--amber); color: var(--amber); }
+.btn-icon {
+  width: 28px; height: 28px;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.85rem;
+}
+.btn:disabled { opacity: 0.25; cursor: default; pointer-events: none; }
+.chart-date-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--muted);
+  white-space: nowrap;
+  min-width: 128px;
+  text-align: center;
+}
+/* Direction toggle — segment */
+.seg-btn {
+  background: none;
+  border: 1px solid var(--border2);
+  color: var(--text-soft);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.7rem;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 0.12s;
+  letter-spacing: 0.03em;
+}
+.seg-btn:first-child { border-radius: 6px 0 0 6px; border-right: none; }
+.seg-btn:last-child  { border-radius: 0 6px 6px 0; }
+.seg-btn:hover { color: var(--text); background: var(--surface2); }
+.seg-btn.active { background: var(--surface2); color: var(--text); border-color: var(--green); }
+
+.chart-legend {
+  display: flex;
+  gap: 1rem;
+  padding: 0.7rem 1.2rem 0;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 0.35rem;
+  font-family: 'DM Mono', monospace; font-size: 0.68rem;
+  color: var(--text-soft);
+  transition: opacity 0.2s;
+}
+.legend-item.dim { opacity: 0.35; }
+.legend-line { width: 18px; height: 2px; border-radius: 2px; flex-shrink: 0; }
+.legend-bar  { width: 10px; height: 9px; border-radius: 2px; flex-shrink: 0; opacity: 0.6; }
+
+.chart-body {
+  padding: 0.5rem 0.75rem 1rem;
+  height: 300px;
+  position: relative;
+}
+.chart-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
+/* ── Empty / placeholder ── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  color: var(--muted);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  gap: 0.5rem;
+}
+.empty-state .big { font-size: 2rem; }
+
+/* ── Data note ── */
+.data-note {
+  margin-top: 1rem;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+}
+.data-note span { color: var(--amber); }
+
+/* ── Footer ── */
+footer {
+  margin-top: 1.5rem;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--muted);
+  line-height: 1.9;
+}
+footer a { color: var(--text-soft); text-decoration: none; }
+footer a:hover { color: var(--green); }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<nav id="sidebar">
+  <div class="sidebar-logo">
+    <h1>PLZEŇ <span>CYKLO</span></h1>
+    <p>Monitorování provozu kol &amp; koloběžek</p>
+  </div>
+  <div id="nav-tree"></div>
+</nav>
+
+<!-- Main -->
+<div id="main">
+  <div id="app">
+    <div class="empty-state">
+      <span class="big">🚲</span>
+      <span>Vyberte lokalitu v levém menu</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────────
+let navData       = [];
+let weatherData   = {};  // {date: {t, p}}
+let currentLocId  = null;
+let currentData   = null;  // {combined: [...], collectors: [...]}
+let currentLoc    = null;  // location metadata
+
+let isCombined    = true;
+let weatherVisible= true;
+let activeRange   = 90;
+let viewEndDate   = null;
+let currentDates  = [];
+
+let chart = null;
+
+// ── Date helpers ───────────────────────────────────────────────────────────────
+function today() {
+  const now = new Date();
+  const offset = now.getHours() < 4 ? 2 : 1;
+  const d = new Date(now); d.setDate(d.getDate() - offset);
+  return toDs(d);
+}
+function toDs(d)       { return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+function pad(n)        { return String(n).padStart(2,'0'); }
+function fmt(n)        { return n == null ? '—' : n.toLocaleString('cs-CZ'); }
+function subDays(ds, n){ const d = new Date(ds+'T00:00:00'); d.setDate(d.getDate()-n); return toDs(d); }
+function addDays(ds, n){ const d = new Date(ds+'T00:00:00'); d.setDate(d.getDate()+n); return toDs(d); }
+function monthOf(ds)   { return ds.slice(0,7); }
+function yearOf(ds)    { return ds.slice(0,4); }
+
+// ── API ────────────────────────────────────────────────────────────────────────
+async function apiFetch(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  return r.json();
+}
+
+// ── Nav ────────────────────────────────────────────────────────────────────────
+async function loadNav() {
+  navData = await apiFetch('/bikecounters/api/nav');
+  renderNav();
+}
+
+function renderNav() {
+  const tree = document.getElementById('nav-tree');
+  tree.innerHTML = '';
+  for (const section of navData) {
+    const secEl = document.createElement('div');
+    secEl.className = 'nav-section';
+    secEl.textContent = section.label;
+    tree.appendChild(secEl);
+    for (const item of section.items) {
+      tree.appendChild(buildNavItem(item));
+    }
+  }
+}
+
+function buildNavItem(item) {
+  if (item.type === 'group') {
+    const wrapper = document.createElement('div');
+
+    const header = document.createElement('div');
+    header.className = 'nav-group-header';
+    header.innerHTML = `
+      <span>${item.icon || '📍'}</span>
+      <span>${item.name}</span>
+      <span class="nav-group-chevron">▶</span>`;
+
+    const children = document.createElement('div');
+    children.className = 'nav-group-children collapsed';
+
+    for (const child of item.children) {
+      const ci = document.createElement('div');
+      ci.className = 'nav-item nav-subitem';
+      ci.dataset.locId = child.id;
+      ci.style.setProperty('--item-color', child.color);
+      ci.innerHTML = `<span class="nav-dot"></span>${child.name}`;
+      ci.addEventListener('click', () => selectLocation(child.id));
+      children.appendChild(ci);
+    }
+
+    header.addEventListener('click', () => {
+      header.classList.toggle('open');
+      children.classList.toggle('collapsed');
+    });
+
+    wrapper.appendChild(header);
+    wrapper.appendChild(children);
+    return wrapper;
+  } else {
+    const el = document.createElement('div');
+    el.className = 'nav-item';
+    el.dataset.locId = item.id;
+    el.style.setProperty('--item-color', item.color);
+    el.innerHTML = `<span class="nav-dot"></span>${item.icon ? item.icon + ' ' : ''}${item.name}`;
+    el.addEventListener('click', () => selectLocation(item.id));
+    return el;
+  }
+}
+
+function setNavActive(locId) {
+  document.querySelectorAll('.nav-item').forEach(el => {
+    const active = el.dataset.locId === locId;
+    el.classList.toggle('active', active);
+    // Open parent group if needed
+    if (active) {
+      const parent = el.closest('.nav-group-children');
+      if (parent) {
+        parent.classList.remove('collapsed');
+        parent.previousElementSibling?.classList.add('open');
+      }
+    }
+  });
+}
+
+// ── Location loading ───────────────────────────────────────────────────────────
+async function selectLocation(locId) {
+  if (locId === currentLocId) return;
+  currentLocId = locId;
+  setNavActive(locId);
+  viewEndDate = null;
+  renderSkeleton();
+  try {
+    const [locMeta, data] = await Promise.all([
+      apiFetch(`/bikecounters/api/location/${locId}`),
+      apiFetch(`/bikecounters/api/daily/${locId}`),
+    ]);
+    currentLoc  = locMeta;
+    currentData = data;
+    renderPage();
+  } catch(e) {
+    document.getElementById('app').innerHTML =
+      `<div class="empty-state"><span class="big">⚠️</span><span>${e.message}</span></div>`;
+  }
+}
+
+function renderSkeleton() {
+  document.getElementById('app').innerHTML = `
+    <div class="empty-state">
+      <span class="big">⏳</span><span>Načítání dat…</span>
+    </div>`;
+}
+
+// ── Page render ────────────────────────────────────────────────────────────────
+function renderPage() {
+  const hasWeather = Object.keys(weatherData).length > 0;
+  const loc = currentLoc;
+  const typeBadge = loc.type === 'ecocounter' ? 'ECO-COUNTER' : 'KAMERA';
+
+  document.getElementById('app').innerHTML = `
+    <div class="content-header">
+      <h2>${loc.name}</h2>
+      <span class="source-badge">${typeBadge}</span>
+    </div>
+
+    <div class="stat-cards" id="stat-cards"></div>
+
+    <div class="chart-section">
+      <div class="chart-head">
+        <span class="chart-title">DENNÍ PROVOZ</span>
+        <div class="ctrl-group" id="range-btns">
+          ${[7,30,90,365,0].map(d => {
+            const lbl = d===7?'7D':d===30?'1M':d===90?'3M':d===365?'1R':'Vše';
+            return `<button class="btn${d===activeRange?' active':''}" data-days="${d}" onclick="setRange(${d})">${lbl}</button>`;
+          }).join('')}
+        </div>
+        <div class="ctrl-divider"></div>
+        <div class="ctrl-group">
+          <button class="btn btn-icon" id="pan-back" onclick="panChart(-1)">◀</button>
+          <span class="chart-date-label" id="chart-date-label"></span>
+          <button class="btn btn-icon" id="pan-fwd" onclick="panChart(1)">▶</button>
+        </div>
+        <div class="ctrl-divider"></div>
+        ${hasWeather ? `<button class="btn amber${weatherVisible?' active':''}" id="weather-btn" onclick="toggleWeather()">☁ POČASÍ</button><div class="ctrl-divider"></div>` : ''}
+        ${loc.collectors.length > 1 ? `
+        <div>
+          <button class="seg-btn${isCombined?' active':''}" onclick="setDirection(true)">Celkem</button>
+          <button class="seg-btn${!isCombined?' active':''}" onclick="setDirection(false)">Směry</button>
+        </div>` : ''}
+      </div>
+      <div class="chart-legend" id="chart-legend"></div>
+      <div class="chart-body">
+        <div class="chart-loading" id="chart-loading" style="display:none">NAČÍTÁNÍ…</div>
+        <canvas id="chart-canvas"></canvas>
+      </div>
+    </div>
+
+    <div class="data-note" id="data-note">Data: <span id="data-range">…</span></div>
+
+    <footer>
+      Zdroj: <a href="https://opendata.plzen.eu/" target="_blank">opendata.plzen.eu</a>
+      &nbsp;·&nbsp; Počasí: <a href="https://opendata.chmi.cz/" target="_blank">opendata.chmi.cz</a>
+      stanice Plzeň-Mikulka (WMO 11450) &nbsp;·&nbsp; ČHMÚ CC BY 4.0
+    </footer>
+  `;
+
+  if (chart) { chart.destroy(); chart = null; }
+  initChart();
+  updateChart();
+  renderStatCards();
+}
+
+// ── Stat cards ─────────────────────────────────────────────────────────────────
+function renderStatCards() {
+  if (!currentData) return;
+  const yStr = today();
+  const mStr = yStr.slice(0,7);
+  const yr   = yStr.slice(0,4);
+
+  // Pick data source (combined or first collector for "separate" display in cards)
+  const rows = currentData.combined;
+
+  let yd = {bikes:0, scooters:0};
+  let mo = {bikes:0, scooters:0};
+  let an = {bikes:0, scooters:0};
+  let first = null, last = null;
+
+  for (const r of rows) {
+    if (!first) first = r.date;
+    last = r.date;
+    if (r.date === yStr) { yd.bikes += r.bikes; yd.scooters += r.scooters; }
+    if (r.date.startsWith(mStr)) { mo.bikes += r.bikes; mo.scooters += r.scooters; }
+    if (r.date.startsWith(yr))   { an.bikes += r.bikes; an.scooters += r.scooters; }
+  }
+
+  const col = currentLoc.color;
+  const periods = [
+    { label: 'Včera',      period: yStr,  data: yd },
+    { label: 'Tento měsíc',period: mStr,  data: mo },
+    { label: 'Tento rok',  period: yr,    data: an },
+  ];
+
+  document.getElementById('stat-cards').innerHTML = periods.map(p => `
+    <div class="stat-card">
+      <div class="stat-card-label">${p.label}</div>
+      <div class="stat-card-period">${p.period}</div>
+      <div class="stat-card-value${p.data.bikes + p.data.scooters === 0 ? ' dim' : ''}"
+           style="${p.data.bikes + p.data.scooters > 0 ? `color:${col}` : ''}">
+        ${fmt(p.data.bikes + p.data.scooters)}
+      </div>
+      <div class="stat-card-chips">
+        <span class="chip"><span class="chip-dot" style="background:${col}"></span>kola ${fmt(p.data.bikes)}</span>
+        <span class="chip"><span class="chip-dot" style="background:#58a6ff"></span>koloběžky ${fmt(p.data.scooters)}</span>
+      </div>
+    </div>`).join('');
+
+  const noteEl = document.getElementById('data-range');
+  if (noteEl && first && last)
+    noteEl.innerHTML = `<span>${first} – ${last}</span>`;
+}
+
+// ── Chart ──────────────────────────────────────────────────────────────────────
+function initChart() {
+  const ctx = document.getElementById('chart-canvas').getContext('2d');
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      animation: { duration: 200, easing: 'easeInOutQuart' },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1c2128',
+          borderColor: '#30363d', borderWidth: 1,
+          titleColor: '#8b949e', bodyColor: '#e6edf3',
+          titleFont: { family: "'DM Mono', monospace", size: 11 },
+          bodyFont:  { family: "'DM Mono', monospace", size: 12 },
+          padding: 10,
+          callbacks: {
+            title: items => {
+              const lbl = items[0]?.label ?? '';
+              const day = currentDates[items[0]?.dataIndex];
+              if (!day) return lbl;
+              const dayNames = ['ne','po','út','st','čt','pá','so'];
+              return `${lbl}  ${dayNames[new Date(day+'T12:00:00').getDay()]}`;
+            },
+            label: item => {
+              if (item.dataset.yAxisID === 'y1') {
+                const v = item.parsed.y;
+                return v == null ? null : ` 🌡 ${v.toFixed(1)} °C`;
+              }
+              if (item.dataset.yAxisID === 'y2') {
+                const v = item.parsed.y;
+                return v == null ? null : ` 💧 ${v.toFixed(1)} mm`;
+              }
+              return ` ${item.dataset.label}: ${item.parsed.y?.toLocaleString('cs-CZ') ?? '—'}`;
+            },
+            filter: item => item.parsed.y != null,
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid:  { color: '#21262d' },
+          ticks: { color: '#6e7681', font: { family: "'DM Mono', monospace", size: 10 },
+                   maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+          border: { color: '#30363d' },
+        },
+        y: {
+          grid:  { color: '#21262d' },
+          ticks: { color: '#6e7681', font: { family: "'DM Mono', monospace", size: 10 },
+                   callback: v => v.toLocaleString('cs-CZ') },
+          border: { color: '#30363d' },
+          beginAtZero: true,
+        },
+        y1: {
+          type: 'linear', display: false, position: 'right',
+          grid: { drawOnChartArea: false },
+          ticks: { color: '#e3b341', font: { family: "'DM Mono', monospace", size: 10 },
+                   callback: v => v.toFixed(0) + '°' },
+          border: { color: '#e3b34150' },
+        },
+        y2: {
+          type: 'linear', display: false, position: 'left',
+          beginAtZero: true,
+        },
+      },
+    },
+  });
+}
+
+function buildDatasets(filtered) {
+  const hasWeather = Object.keys(weatherData).length > 0;
+  const datasets = [];
+
+  if (isCombined || !currentData.collectors.length) {
+    // Single combined line
+    const color = currentLoc.color;
+    const fill  = color + '14';
+    const combinedMap = new Map((currentData.combined || []).map(r => [r.date, r.bikes + r.scooters]));
+    datasets.push({
+      type: 'line',
+      label: currentLoc.name,
+      data: filtered.map(d => combinedMap.get(d) ?? 0),
+      borderColor: color, backgroundColor: fill,
+      borderWidth: 2, pointRadius: filtered.length <= 60 ? 3 : 0,
+      pointHoverRadius: 5, pointBackgroundColor: color,
+      tension: 0.35, fill: true, yAxisID: 'y', order: 2,
+    });
+  } else {
+    // One line per collector
+    for (const col of currentData.collectors) {
+      const dataMap = new Map(col.data.map(r => [r.date, r.bikes + r.scooters]));
+      datasets.push({
+        type: 'line',
+        label: col.label,
+        data: filtered.map(d => dataMap.get(d) ?? 0),
+        borderColor: col.color, backgroundColor: col.color + '10',
+        borderWidth: 2, pointRadius: filtered.length <= 60 ? 2 : 0,
+        pointHoverRadius: 4, pointBackgroundColor: col.color,
+        tension: 0.35, fill: false, yAxisID: 'y', order: 2,
+      });
+    }
+  }
+
+  // Weather
+  if (hasWeather && weatherVisible) {
+    const tempData = filtered.map(d => weatherData[d]?.t ?? null);
+    const rainData = filtered.map(d => weatherData[d]?.p ?? null);
+    const maxRain  = Math.max(0, ...rainData.filter(v => v != null));
+    chart.options.scales.y2.max = maxRain > 0 ? maxRain * 4 : 40;
+    chart.options.scales.y1.display = true;
+
+    datasets.push({
+      type: 'bar', label: 'Srážky (mm)',
+      data: rainData,
+      backgroundColor: 'rgba(88,166,255,0.2)', borderColor: 'rgba(88,166,255,0.4)',
+      borderWidth: 1, borderRadius: 2,
+      yAxisID: 'y2', spanGaps: false, order: 10,
+    });
+    datasets.push({
+      type: 'line', label: 'Teplota (°C)',
+      data: tempData,
+      borderColor: '#e3b341', backgroundColor: 'transparent',
+      borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4,
+      tension: 0.4, yAxisID: 'y1', spanGaps: true, order: 1,
+    });
+  } else {
+    chart.options.scales.y1.display = false;
+  }
+
+  return datasets;
+}
+
+function updateChart() {
+  if (!chart || !currentData) return;
+
+  const yStr    = today();
+  const endDate = viewEndDate && viewEndDate < yStr ? viewEndDate : yStr;
+  const allDates = (currentData.combined || []).map(r => r.date);
+  const fromDate = activeRange > 0 ? subDays(endDate, activeRange - 1) : (allDates[0] || yStr);
+  const filtered = allDates.filter(d => d >= fromDate && d <= endDate);
+  currentDates   = filtered;
+
+  // Pan buttons
+  const panFwd = document.getElementById('pan-fwd');
+  if (panFwd) panFwd.disabled = endDate >= yStr;
+
+  // Date label
+  const labelEl = document.getElementById('chart-date-label');
+  if (labelEl && filtered.length > 0) {
+    const f = filtered[0].split('-'), l = filtered.at(-1).split('-');
+    labelEl.textContent = `${f[2]}.${f[1]}.${f[0].slice(2)} – ${l[2]}.${l[1]}.${l[0].slice(2)}`;
+  }
+
+  // X labels
+  const spanYears = filtered.length > 0 &&
+    filtered[0].slice(0,4) !== filtered.at(-1).slice(0,4);
+  const labels = filtered.map(d => {
+    const [y,m,day] = d.split('-');
+    return spanYears ? `${day}.${m}.${y.slice(2)}` : `${day}.${m}.`;
+  });
+
+  chart.data.labels   = labels;
+  chart.data.datasets = buildDatasets(filtered);
+  chart.update();
+  renderLegend(filtered);
+}
+
+function renderLegend(filtered) {
+  const legendEl = document.getElementById('chart-legend');
+  if (!legendEl) return;
+  legendEl.innerHTML = '';
+
+  const add = (color, label, isBar=false) => {
+    const el = document.createElement('div');
+    el.className = 'legend-item';
+    el.innerHTML = isBar
+      ? `<div class="legend-bar" style="background:${color}"></div>${label}`
+      : `<div class="legend-line" style="background:${color}"></div>${label}`;
+    legendEl.appendChild(el);
+  };
+
+  if (isCombined || currentData.collectors.length <= 1) {
+    add(currentLoc.color, currentLoc.name);
+  } else {
+    for (const col of currentData.collectors) add(col.color, col.label);
+  }
+
+  const hasWeather = Object.keys(weatherData).length > 0;
+  if (hasWeather) {
+    const dim = !weatherVisible;
+    const t = document.createElement('div');
+    t.className = 'legend-item' + (dim ? ' dim' : '');
+    t.innerHTML = `<div class="legend-line" style="background:#e3b341"></div>Teplota (°C)`;
+    legendEl.appendChild(t);
+    const p = document.createElement('div');
+    p.className = 'legend-item' + (dim ? ' dim' : '');
+    p.innerHTML = `<div class="legend-bar" style="background:#58a6ff"></div>Srážky (mm)`;
+    legendEl.appendChild(p);
+  }
+}
+
+// ── Controls ───────────────────────────────────────────────────────────────────
+function setRange(days) {
+  activeRange = days;
+  viewEndDate = null;
+  document.querySelectorAll('#range-btns .btn').forEach(btn =>
+    btn.classList.toggle('active', +btn.dataset.days === days));
+  updateChart();
+}
+
+function panChart(dir) {
+  const yStr = today();
+  const cur  = viewEndDate || yStr;
+  const step = activeRange > 0 ? Math.max(7, Math.round(activeRange / 2)) : 90;
+  const next = dir > 0 ? addDays(cur, step) : subDays(cur, step);
+  viewEndDate = next >= yStr ? null : next;
+  updateChart();
+}
+
+function toggleWeather() {
+  weatherVisible = !weatherVisible;
+  const btn = document.getElementById('weather-btn');
+  if (btn) btn.classList.toggle('active', weatherVisible);
+  updateChart();
+}
+
+function setDirection(combined) {
+  isCombined = combined;
+  document.querySelectorAll('.seg-btn').forEach((btn, i) =>
+    btn.classList.toggle('active', i === (combined ? 0 : 1)));
+  updateChart();
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────────
+(async () => {
+  // Load weather once, silently
+  apiFetch('/bikecounters/api/weather')
+    .then(d => { weatherData = d; })
+    .catch(() => {});
+
+  await loadNav();
+
+  // Auto-select first eco-counter location
+  const firstEco = navData
+    .find(s => s.label === 'ECO-COUNTER')?.items?.[0];
+  if (firstEco) selectLocation(firstEco.id);
+})();
+</script>
+</body>
+</html>
