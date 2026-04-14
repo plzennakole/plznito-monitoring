@@ -708,13 +708,11 @@ function buildDatasets(filtered) {
     // Single combined line
     const color = currentLoc.color;
     const fill  = color + '14';
+    const combinedMap = new Map((currentData.combined || []).map(r => [r.date, r.bikes + r.scooters]));
     datasets.push({
       type: 'line',
       label: currentLoc.name,
-      data: filtered.map(d => {
-        const r = (currentData.combined || []).find(x => x.date === d);
-        return r ? r.bikes + r.scooters : 0;
-      }),
+      data: filtered.map(d => combinedMap.get(d) ?? 0),
       borderColor: color, backgroundColor: fill,
       borderWidth: 2, pointRadius: filtered.length <= 60 ? 3 : 0,
       pointHoverRadius: 5, pointBackgroundColor: color,
