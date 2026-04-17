@@ -222,10 +222,14 @@ def api_counts(loc_id):
         abort(404)
  
     collectors = loc["collectors"]
+
+    resolution = request.args.get("resolution", "daily")
+    if resolution != "hourly":
+        resolution = "daily"
+
     if not collectors:
-        return jsonify({"resolution": "daily", "combined": [], "collectors": []})
+        return jsonify({"resolution": resolution, "combined": [], "collectors": []})
  
-    resolution  = request.args.get("resolution", "daily")
     from_date   = request.args.get("from")
     to_date     = request.args.get("to")
  
