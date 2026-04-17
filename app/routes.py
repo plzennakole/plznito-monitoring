@@ -314,9 +314,14 @@ def api_counts(loc_id):
 @app.route("/bikecounters/api/daily/<loc_id>")
 def api_daily(loc_id):
     from flask import request
-    # Reuse api_counts with resolution=daily and pass through any query params
-    request.environ['QUERY_STRING'] = 'resolution=daily'
-    return api_counts(loc_id)
+    # Reuse api_counts with resolution=daily while preserving any other query params
+    query_args = request.args.to_dict(flat=False)
+    query_args["resolution"] = "daily"
+    with app.test_request_context(
+        f"/bikecounters/api/counts/{loc_id}",
+        query_string=query_args,
+    ):
+        return api_counts(loc_id)
  
 # ── Weather API ────────────────────────────────────────────────────────────────
  
