@@ -747,6 +747,9 @@ function buildDatasets(filtered) {
   // For hourly: use stacked bars; for daily: use filled lines
   const chartType  = isHourly ? 'bar' : 'line';
 
+  chart.options.scales.x.stacked = isHourly;
+  chart.options.scales.y.stacked = isHourly;
+
   if (isCombined || !currentData.collectors.length) {
     const color = currentLoc.color;
     const dataMap = new Map((currentData.combined || []).map(r => [r.ts, r.bikes + r.scooters]));
