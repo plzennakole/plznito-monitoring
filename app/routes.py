@@ -229,11 +229,15 @@ def api_counts(loc_id):
     from_date   = request.args.get("from")
     to_date     = request.args.get("to")
  
+    allowed_resolutions = {
+        "hourly": "substr(ts, 1, 13)",  # 'YYYY-MM-DD HH'
+        "daily": "substr(ts, 1, 10)",   # 'YYYY-MM-DD'
+    }
+    if resolution not in allowed_resolutions:
+        abort(400, description="Invalid resolution. Supported values are 'hourly' and 'daily'.")
+ 
     # SQL truncation expression per resolution
-    if resolution == "hourly":
-        trunc = "substr(ts, 1, 13)"   # 'YYYY-MM-DD HH'
-    else:
-        trunc = "substr(ts, 1, 10)"   # 'YYYY-MM-DD'
+    trunc = allowed_resolutions[resolution]
  
     source_ids   = [c["source_id"] for c in collectors]
     placeholders = ",".join("?" * len(source_ids))
