@@ -267,7 +267,7 @@ def api_counts(loc_id):
     combined_rows = [{"ts": r["period"], "bikes": r["bikes"], "scooters": r["scooters"]} for r in combined_rows_raw]
     import logging as _l
     if combined_rows:
-        _l.getLogger(__name__).info(
+        _l.getLogger(__name__).debug(
             "api_counts %s/%s: %d buckets, sample: %s",
             loc_id, resolution, len(combined_rows), combined_rows[-1])
  
