@@ -341,6 +341,10 @@ def api_weather():
 @app.route("/bikecounters/api/debug/<loc_id>")
 def api_debug(loc_id):
     """Show raw DB stats for a location — helps diagnose ingestion issues."""
+    debug_enabled = os.getenv("BIKECOUNTERS_ENABLE_DEBUG_API", "").lower() in ("1", "true", "yes", "on")
+    if not debug_enabled:
+        abort(404)
+
     loc = bw_cfg.LOCATION_BY_ID.get(loc_id)
     if not loc:
         abort(404)
