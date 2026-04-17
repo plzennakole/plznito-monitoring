@@ -144,7 +144,7 @@ body {
 /* ── Stat cards ── */
 .stat-cards {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
@@ -381,9 +381,11 @@ let navData       = [];
 let weatherData   = {};  // {date: {t, p}}
 let currentLocId  = null;
 let currentData   = null;  // {combined: [...], collectors: [...]}
+let dailyData     = null;  // always full daily dataset, used by stat cards
 let currentLoc    = null;  // location metadata
 
 let isCombined    = true;
+let resolution    = 'daily';  // 'hourly' | 'daily'
 let weatherVisible= true;
 let activeRange   = 90;
 let viewEndDate   = null;
@@ -497,18 +499,44 @@ async function selectLocation(locId) {
   currentLocId = locId;
   setNavActive(locId);
   viewEndDate = null;
+  currentData = null;
+  dailyData   = null;
   renderSkeleton();
   try {
-    const [locMeta, data] = await Promise.all([
-      apiFetch(`/bikecounters/api/location/${locId}`),
-      apiFetch(`/bikecounters/api/daily/${locId}`),
-    ]);
-    currentLoc  = locMeta;
-    currentData = data;
+    currentLoc = await apiFetch(`/bikecounters/api/location/${locId}`);
+    await fetchCounts();
     renderPage();
   } catch(e) {
     document.getElementById('app').innerHTML =
       `<div class="empty-state"><span class="big">⚠️</span><span>${e.message}</span></div>`;
+  }
+}
+
+function getResolution() {
+  return activeRange === 7 ? 'hourly' : 'daily';
+}
+
+async function fetchCounts() {
+  if (!currentLocId) return;
+  const res  = getResolution();
+  resolution = res;
+
+  if (res === 'hourly') {
+    // Fetch hourly window for the chart AND full daily for stat cards
+    const yStr = today();
+    const end  = viewEndDate && viewEndDate < yStr ? viewEndDate : yStr;
+    const from = subDays(end, 6);
+    const [hourly, daily] = await Promise.all([
+      apiFetch(`/bikecounters/api/counts/${currentLocId}?resolution=hourly&from=${from}&to=${end}`),
+      dailyData ? Promise.resolve(dailyData)   // reuse if already loaded
+               : apiFetch(`/bikecounters/api/counts/${currentLocId}?resolution=daily`),
+    ]);
+    currentData = hourly;
+    dailyData   = daily;
+  } else {
+    // Full daily — use for both chart and stat cards
+    currentData = await apiFetch(`/bikecounters/api/counts/${currentLocId}?resolution=daily`);
+    dailyData   = currentData;
   }
 }
 
@@ -581,31 +609,36 @@ function renderPage() {
 // ── Stat cards ─────────────────────────────────────────────────────────────────
 function renderStatCards() {
   if (!currentData) return;
-  const yStr = today();
-  const mStr = yStr.slice(0,7);
-  const yr   = yStr.slice(0,4);
+  const yStr    = today();
+  const mStr    = yStr.slice(0,7);
+  const yr      = yStr.slice(0,4);
+  const d365str = subDays(yStr, 364);
 
-  // Pick data source (combined or first collector for "separate" display in cards)
-  const rows = currentData.combined;
+  const rows = (dailyData || currentData).combined;
 
-  let yd = {bikes:0, scooters:0};
-  let mo = {bikes:0, scooters:0};
-  let an = {bikes:0, scooters:0};
+  let yd  = {bikes:0, scooters:0};
+  let mo  = {bikes:0, scooters:0};
+  let cal = {bikes:0, scooters:0};
+  let ytd = {bikes:0, scooters:0};
   let first = null, last = null;
 
   for (const r of rows) {
-    if (!first) first = r.date;
-    last = r.date;
-    if (r.date === yStr) { yd.bikes += r.bikes; yd.scooters += r.scooters; }
-    if (r.date.startsWith(mStr)) { mo.bikes += r.bikes; mo.scooters += r.scooters; }
-    if (r.date.startsWith(yr))   { an.bikes += r.bikes; an.scooters += r.scooters; }
+    const d = (r.ts || r.date || '').slice(0, 10);
+    if (!d) continue;
+    if (!first) first = d;
+    last = d;
+    if (d === yStr)         { yd.bikes  += r.bikes; yd.scooters  += r.scooters; }
+    if (d.startsWith(mStr)) { mo.bikes  += r.bikes; mo.scooters  += r.scooters; }
+    if (d.startsWith(yr))   { cal.bikes += r.bikes; cal.scooters += r.scooters; }
+    if (d >= d365str)       { ytd.bikes += r.bikes; ytd.scooters += r.scooters; }
   }
 
   const col = currentLoc.color;
   const periods = [
-    { label: 'Včera',      period: yStr,  data: yd },
-    { label: 'Tento měsíc',period: mStr,  data: mo },
-    { label: 'Tento rok',  period: yr,    data: an },
+    { label: 'Včera',              period: yStr,                   data: yd  },
+    { label: 'Tento měsíc',        period: mStr,                   data: mo  },
+    { label: 'Tento rok',          period: yr,                     data: cal },
+    { label: 'Posledních 365 dní', period: `${d365str} – ${yStr}`, data: ytd },
   ];
 
   document.getElementById('stat-cards').innerHTML = periods.map(p => `
@@ -649,11 +682,18 @@ function initChart() {
           padding: 10,
           callbacks: {
             title: items => {
-              const lbl = items[0]?.label ?? '';
-              const day = currentDates[items[0]?.dataIndex];
-              if (!day) return lbl;
+              const ts = currentDates[items[0]?.dataIndex];
+              if (!ts) return items[0]?.label ?? '';
               const dayNames = ['ne','po','út','st','čt','pá','so'];
-              return `${lbl}  ${dayNames[new Date(day+'T12:00:00').getDay()]}`;
+              const dateStr = ts.slice(0, 10);               // 'YYYY-MM-DD'
+              const dn = dayNames[new Date(dateStr + 'T12:00:00').getDay()];
+              const [y, m, d] = dateStr.split('-');
+              const dateFmt = `${d}.${m}.${y.slice(2)}`;
+              if (resolution === 'hourly') {
+                const hour = ts.slice(11, 13);               // 'HH'
+                return `${dateFmt}  ${dn}  ${hour}:00`;
+              }
+              return `${dateFmt}  ${dn}`;
             },
             label: item => {
               if (item.dataset.yAxisID === 'y1') {
@@ -702,56 +742,66 @@ function initChart() {
 
 function buildDatasets(filtered) {
   const hasWeather = Object.keys(weatherData).length > 0;
-  const datasets = [];
+  const isHourly   = resolution === 'hourly';
+  const datasets   = [];
+  // For hourly: use stacked bars; for daily: use filled lines
+  const chartType  = isHourly ? 'bar' : 'line';
 
   if (isCombined || !currentData.collectors.length) {
-    // Single combined line
     const color = currentLoc.color;
-    const fill  = color + '14';
-    const combinedMap = new Map((currentData.combined || []).map(r => [r.date, r.bikes + r.scooters]));
-    datasets.push({
-      type: 'line',
+    const dataMap = new Map((currentData.combined || []).map(r => [r.ts, r.bikes + r.scooters]));
+    const ds = {
+      type: chartType,
       label: currentLoc.name,
-      data: filtered.map(d => combinedMap.get(d) ?? 0),
-      borderColor: color, backgroundColor: fill,
-      borderWidth: 2, pointRadius: filtered.length <= 60 ? 3 : 0,
-      pointHoverRadius: 5, pointBackgroundColor: color,
-      tension: 0.35, fill: true, yAxisID: 'y', order: 2,
-    });
+      data: filtered.map(d => dataMap.get(d) ?? 0),
+      borderColor: color,
+      backgroundColor: isHourly ? color + 'cc' : color + '14',
+      borderWidth: isHourly ? 0 : 2,
+      borderRadius: isHourly ? 3 : 0,
+      pointRadius: (!isHourly && filtered.length <= 60) ? 3 : 0,
+      pointHoverRadius: isHourly ? 0 : 5,
+      pointBackgroundColor: color,
+      tension: 0.35,
+      fill: !isHourly,
+      yAxisID: 'y', order: 2,
+    };
+    datasets.push(ds);
   } else {
-    // One line per collector
     for (const col of currentData.collectors) {
-      const dataMap = new Map(col.data.map(r => [r.date, r.bikes + r.scooters]));
+      const dataMap = new Map(col.data.map(r => [r.ts, r.bikes + r.scooters]));
       datasets.push({
-        type: 'line',
+        type: chartType,
         label: col.label,
         data: filtered.map(d => dataMap.get(d) ?? 0),
-        borderColor: col.color, backgroundColor: col.color + '10',
-        borderWidth: 2, pointRadius: filtered.length <= 60 ? 2 : 0,
-        pointHoverRadius: 4, pointBackgroundColor: col.color,
-        tension: 0.35, fill: false, yAxisID: 'y', order: 2,
+        borderColor: col.color,
+        backgroundColor: isHourly ? col.color + 'cc' : col.color + '10',
+        borderWidth: isHourly ? 0 : 2,
+        borderRadius: isHourly ? 2 : 0,
+        pointRadius: (!isHourly && filtered.length <= 60) ? 2 : 0,
+        pointHoverRadius: isHourly ? 0 : 4,
+        pointBackgroundColor: col.color,
+        tension: 0.35,
+        fill: false,
+        stack: isHourly ? 'traffic' : undefined,
+        yAxisID: 'y', order: 2,
       });
     }
   }
 
-  // Weather
-  if (hasWeather && weatherVisible) {
+  // Weather overlay — only on daily view (hourly chart too dense)
+  if (hasWeather && weatherVisible && !isHourly) {
     const tempData = filtered.map(d => weatherData[d]?.t ?? null);
     const rainData = filtered.map(d => weatherData[d]?.p ?? null);
     const maxRain  = Math.max(0, ...rainData.filter(v => v != null));
     chart.options.scales.y2.max = maxRain > 0 ? maxRain * 4 : 40;
     chart.options.scales.y1.display = true;
-
     datasets.push({
-      type: 'bar', label: 'Srážky (mm)',
-      data: rainData,
+      type: 'bar', label: 'Srážky (mm)', data: rainData,
       backgroundColor: 'rgba(88,166,255,0.2)', borderColor: 'rgba(88,166,255,0.4)',
-      borderWidth: 1, borderRadius: 2,
-      yAxisID: 'y2', spanGaps: false, order: 10,
+      borderWidth: 1, borderRadius: 2, yAxisID: 'y2', spanGaps: false, order: 10,
     });
     datasets.push({
-      type: 'line', label: 'Teplota (°C)',
-      data: tempData,
+      type: 'line', label: 'Teplota (°C)', data: tempData,
       borderColor: '#e3b341', backgroundColor: 'transparent',
       borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4,
       tension: 0.4, yAxisID: 'y1', spanGaps: true, order: 1,
@@ -766,29 +816,41 @@ function buildDatasets(filtered) {
 function updateChart() {
   if (!chart || !currentData) return;
 
-  const yStr    = today();
-  const endDate = viewEndDate && viewEndDate < yStr ? viewEndDate : yStr;
-  const allDates = (currentData.combined || []).map(r => r.date);
-  const fromDate = activeRange > 0 ? subDays(endDate, activeRange - 1) : (allDates[0] || yStr);
-  const filtered = allDates.filter(d => d >= fromDate && d <= endDate);
-  currentDates   = filtered;
+  const isHourly = resolution === 'hourly';
+  const yStr     = today();
+  const endDate  = (viewEndDate && viewEndDate < yStr) ? viewEndDate : yStr;
+  const allTs    = (currentData.combined || []).map(r => r.ts);
+
+  // Filter to active range window (daily only — hourly is already pre-filtered by API)
+  const filtered = isHourly ? allTs : (() => {
+    const fromDate = activeRange > 0 ? subDays(endDate, activeRange - 1) : (allTs[0] || yStr);
+    return allTs.filter(d => d >= fromDate && d <= endDate);
+  })();
+
+  currentDates = filtered;  // used by tooltip
 
   // Pan buttons
   const panFwd = document.getElementById('pan-fwd');
   if (panFwd) panFwd.disabled = endDate >= yStr;
 
-  // Date label
+  // Date range label
   const labelEl = document.getElementById('chart-date-label');
   if (labelEl && filtered.length > 0) {
-    const f = filtered[0].split('-'), l = filtered.at(-1).split('-');
+    const f = filtered[0].slice(0,10).split('-');
+    const l = filtered.at(-1).slice(0,10).split('-');
     labelEl.textContent = `${f[2]}.${f[1]}.${f[0].slice(2)} – ${l[2]}.${l[1]}.${l[0].slice(2)}`;
   }
 
-  // X labels
-  const spanYears = filtered.length > 0 &&
+  // X-axis labels
+  const spanYears = !isHourly && filtered.length > 0 &&
     filtered[0].slice(0,4) !== filtered.at(-1).slice(0,4);
-  const labels = filtered.map(d => {
-    const [y,m,day] = d.split('-');
+  const labels = filtered.map(ts => {
+    if (isHourly) {
+      const hour = ts.slice(11, 13);
+      const date = ts.slice(8,10) + '.' + ts.slice(5,7) + '.';
+      return hour === '00' ? date : hour + ':00';
+    }
+    const [y,m,day] = ts.split('-');
     return spanYears ? `${day}.${m}.${y.slice(2)}` : `${day}.${m}.`;
   });
 
@@ -796,6 +858,7 @@ function updateChart() {
   chart.data.datasets = buildDatasets(filtered);
   chart.update();
   renderLegend(filtered);
+  if (!isHourly) renderStatCards();
 }
 
 function renderLegend(filtered) {
@@ -833,20 +896,31 @@ function renderLegend(filtered) {
 }
 
 // ── Controls ───────────────────────────────────────────────────────────────────
-function setRange(days) {
-  activeRange = days;
-  viewEndDate = null;
+async function setRange(days) {
+  const oldRes = getResolution();
+  activeRange  = days;
+  viewEndDate  = null;
   document.querySelectorAll('#range-btns .btn').forEach(btn =>
     btn.classList.toggle('active', +btn.dataset.days === days));
-  updateChart();
+  const newRes = getResolution();
+  if (newRes !== oldRes) {
+    await fetchCounts();
+    // Re-render page to reset chart type
+    renderPage();
+  } else {
+    updateChart();
+  }
 }
 
-function panChart(dir) {
+async function panChart(dir) {
   const yStr = today();
   const cur  = viewEndDate || yStr;
   const step = activeRange > 0 ? Math.max(7, Math.round(activeRange / 2)) : 90;
   const next = dir > 0 ? addDays(cur, step) : subDays(cur, step);
   viewEndDate = next >= yStr ? null : next;
+  if (resolution === 'hourly') {
+    await fetchCounts();
+  }
   updateChart();
 }
 

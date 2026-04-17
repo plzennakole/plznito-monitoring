@@ -134,27 +134,43 @@ def ingest_ecocounter():
     )
     db.commit()
     db.close()
-    log.info("  Eco-counter: %d interval records upserted", len(rows_in) + len(rows_out))
+    if rows_in:
+        log.info("  Eco-counter: %d interval records upserted", len(rows_in) + len(rows_out))
+        log.info("  Sample (last 3 rows_in): %s", rows_in[-3:])
+        log.info("  Sample (last 3 rows_out): %s", rows_out[-3:])
+    else:
+        log.warning("  Eco-counter: 0 rows parsed — check CSV format")
 
 # ── Camera ─────────────────────────────────────────────────────────────────────
 
 def _parse_camera_csv(text: str, cam_id: str) -> list[tuple]:
     """Parse a camera CSV and return list of (source_id, ts, bikes, scooters)."""
-    import csv as csv_mod
-
-    # Auto-detect delimiter
-    sample = text[:2000]
-    try:
-        dialect = csv_mod.Sniffer().sniff(sample, delimiters="\t,;")
-        delim = dialect.delimiter
-    except csv_mod.Error:
-        delim = "\t"
-
     lines = text.strip().splitlines()
     if not lines:
         return []
 
-    header = [h.strip().strip('"').lower() for h in lines[0].split(delim)]
+    # The API returns tab-separated data lines. The PowerShell script may have
+    # replaced the header with a semicolon version — detect delimiter from first DATA line.
+    delim = '\t'
+    if len(lines) > 1:
+        sample = lines[1]
+        if '\t' in sample:
+            delim = '\t'
+        elif ';' in sample:
+            delim = ';'
+        else:
+            delim = ','
+
+    # Header may use a different delimiter than data
+    header_line = lines[0]
+    header_delim = delim
+    for hd in (';', '\t', ','):
+        if len(header_line.split(hd)) >= 4:
+            header_delim = hd
+            break
+
+    header = [h.strip().strip('"').lower() for h in header_line.split(header_delim)]
+    log.debug("  Camera %s: header_delim=%r data_delim=%r cols=%s", cam_id, header_delim, delim, header)
 
     def col(*names):
         for name in names:
