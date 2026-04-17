@@ -1,4 +1,4 @@
-""" flask_example.py
+""" run_flask.py
     Required packages:
     - flask
     - folium

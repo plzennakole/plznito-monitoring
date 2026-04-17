@@ -1,6 +1,8 @@
 import importlib.util
 import os
+import re
 import sqlite3
+from datetime import date as _date
 
 from dotenv import load_dotenv
 import pathlib
@@ -42,6 +44,10 @@ CORS_ALLOW_ORIGIN = os.getenv("TRAIN_DELAYS_CORS_ALLOW_ORIGIN") or "*"
 CORS_ALLOW_METHODS = os.getenv("TRAIN_DELAYS_CORS_ALLOW_METHODS") or "GET, OPTIONS"
 CORS_ALLOW_HEADERS = os.getenv("TRAIN_DELAYS_CORS_ALLOW_HEADERS") or "Content-Type"
 CORS_MAX_AGE = os.getenv("TRAIN_DELAYS_CORS_MAX_AGE") or "600"
+
+_DATE_RE             = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_MAX_DATE_RANGE_DAYS = _env_int("BIKECOUNTERS_MAX_DATE_RANGE_DAYS", 730)
+_MAX_RESULT_ROWS     = _env_int("BIKECOUNTERS_MAX_RESULT_ROWS", 50_000)
 
 cache = Cache(app, config={"CACHE_TYPE": "simple", "CACHE_DEFAULT_TIMEOUT": CACHE_TIMEOUT_SECONDS})
 
@@ -232,7 +238,19 @@ def api_counts(loc_id):
  
     from_date   = request.args.get("from")
     to_date     = request.args.get("to")
- 
+
+    if from_date and not _DATE_RE.match(from_date):
+        abort(400, description="Invalid 'from' date. Use YYYY-MM-DD.")
+    if to_date and not _DATE_RE.match(to_date):
+        abort(400, description="Invalid 'to' date. Use YYYY-MM-DD.")
+    if from_date and to_date:
+        try:
+            span = (_date.fromisoformat(to_date) - _date.fromisoformat(from_date)).days
+            if span > _MAX_DATE_RANGE_DAYS:
+                abort(400, description=f"Date range exceeds maximum of {_MAX_DATE_RANGE_DAYS} days.")
+        except ValueError:
+            abort(400, description="Invalid date value.")
+
     allowed_resolutions = {
         "hourly": "substr(ts, 1, 13)",  # 'YYYY-MM-DD HH'
         "daily": "substr(ts, 1, 10)",   # 'YYYY-MM-DD'
@@ -265,6 +283,7 @@ def api_counts(loc_id):
         WHERE source_id IN ({placeholders}) {date_clause}
         GROUP BY period
         ORDER BY period
+        LIMIT {_MAX_RESULT_ROWS}
         """
     combined_rows_raw = query(sql_combined, source_ids + date_params)
     # rename 'period' back to 'ts' for the frontend
@@ -285,6 +304,7 @@ def api_counts(loc_id):
         WHERE source_id IN ({placeholders}) {date_clause}
         GROUP BY source_id, period
         ORDER BY source_id, period
+        LIMIT {_MAX_RESULT_ROWS}
         """,
         source_ids + date_params,
     )
@@ -317,7 +337,6 @@ def api_counts(loc_id):
 # /api/daily kept as alias — frontend still calls it for initial load
 @app.route("/bikecounters/api/daily/<loc_id>")
 def api_daily(loc_id):
-    from flask import request
     # Reuse api_counts with resolution=daily while preserving any other query params
     query_args = request.args.to_dict(flat=False)
     query_args["resolution"] = "daily"
