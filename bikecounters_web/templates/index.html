@@ -901,17 +901,30 @@ function renderLegend(filtered) {
 // ── Controls ───────────────────────────────────────────────────────────────────
 async function setRange(days) {
   const oldRes = getResolution();
+  const oldRange = activeRange;
+  const oldViewEndDate = viewEndDate;
+
   activeRange  = days;
   viewEndDate  = null;
   document.querySelectorAll('#range-btns .btn').forEach(btn =>
     btn.classList.toggle('active', +btn.dataset.days === days));
-  const newRes = getResolution();
-  if (newRes !== oldRes) {
-    await fetchCounts();
-    // Re-render page to reset chart type
-    renderPage();
-  } else {
-    updateChart();
+
+  try {
+    const newRes = getResolution();
+    if (newRes !== oldRes) {
+      await fetchCounts();
+      // Re-render page to reset chart type
+      renderPage();
+    } else {
+      updateChart();
+    }
+  } catch (err) {
+    activeRange = oldRange;
+    viewEndDate = oldViewEndDate;
+    document.querySelectorAll('#range-btns .btn').forEach(btn =>
+      btn.classList.toggle('active', +btn.dataset.days === oldRange));
+    console.error('Failed to change chart range.', err);
+    alert('Nepodařilo se načíst data pro zvolené období.');
   }
 }
 
@@ -920,11 +933,19 @@ async function panChart(dir) {
   const cur  = viewEndDate || yStr;
   const step = activeRange > 0 ? Math.max(7, Math.round(activeRange / 2)) : 90;
   const next = dir > 0 ? addDays(cur, step) : subDays(cur, step);
+  const oldViewEndDate = viewEndDate;
+
   viewEndDate = next >= yStr ? null : next;
-  if (resolution === 'hourly') {
-    await fetchCounts();
+  try {
+    if (resolution === 'hourly') {
+      await fetchCounts();
+    }
+    updateChart();
+  } catch (err) {
+    viewEndDate = oldViewEndDate;
+    console.error('Failed to pan chart.', err);
+    alert('Nepodařilo se načíst data pro posun grafu.');
   }
-  updateChart();
 }
 
 function toggleWeather() {
