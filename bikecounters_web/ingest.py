@@ -469,7 +469,8 @@ def main():
     parser.add_argument("--source", choices=["eco", "cam", "weather", "all"], default="all")
     args = parser.parse_args()
 
-    free_mb = shutil.disk_usage(cfg.DB_PATH).free / 1024**2
+    db_dir = str(Path(cfg.DB_PATH).parent)
+    free_mb = shutil.disk_usage(db_dir).free / 1024**2
     if free_mb < 200:
         log.error("Low disk space: %.0f MB free — aborting ingest to protect DB integrity", free_mb)
         sys.exit(1)
