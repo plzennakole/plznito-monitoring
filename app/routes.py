@@ -54,6 +54,7 @@ cache = Cache(app, config={"CACHE_TYPE": "simple", "CACHE_DEFAULT_TIMEOUT": CACH
 
 def query(sql, params=()):
     with sqlite3.connect(bw_cfg.DB_PATH) as db:
+        db.execute("PRAGMA busy_timeout=5000")
         db.row_factory = sqlite3.Row
         rows = db.execute(sql, params).fetchall()
     return [dict(r) for r in rows]

@@ -14,6 +14,7 @@ import argparse
 import io
 import json
 import logging
+import shutil
 import sqlite3
 import sys
 import time
@@ -35,7 +36,13 @@ log = logging.getLogger(__name__)
 def get_db():
     db = sqlite3.connect(cfg.DB_PATH)
     db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA busy_timeout=5000")
     return db
+
+def checkpoint_db():
+    db = get_db()
+    db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    db.close()
 
 def init_db():
     db = get_db()
@@ -128,11 +135,17 @@ def ingest_ecocounter():
         rows_out.append((f"eco_{site_id}_out", ts, bo, so))
 
     db = get_db()
-    db.executemany(
-        "INSERT OR REPLACE INTO counts(source_id, ts, bikes, scooters) VALUES(?,?,?,?)",
-        rows_in + rows_out,
-    )
-    db.commit()
+    try:
+        db.executemany(
+            "INSERT OR REPLACE INTO counts(source_id, ts, bikes, scooters) VALUES(?,?,?,?)",
+            rows_in + rows_out,
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        db.close()
+        log.error("Eco-counter DB write failed: %s", e)
+        raise
     db.close()
     if rows_in:
         log.info("  Eco-counter: %d interval records upserted", len(rows_in) + len(rows_out))
@@ -230,11 +243,17 @@ def ingest_camera(cam_id: str, name: str):
         return
 
     db = get_db()
-    db.executemany(
-        "INSERT OR REPLACE INTO counts(source_id, ts, bikes, scooters) VALUES(?,?,?,?)",
-        rows,
-    )
-    db.commit()
+    try:
+        db.executemany(
+            "INSERT OR REPLACE INTO counts(source_id, ts, bikes, scooters) VALUES(?,?,?,?)",
+            rows,
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        db.close()
+        log.error("Camera %s DB write failed: %s", cam_id, e)
+        raise
 
     # Auto-discover collectors not yet in config
     found = sorted({r[0] for r in rows})
@@ -430,8 +449,14 @@ def ingest_weather(delete_cache=False):
         rows.append((d, v["t"], v["p"]))
 
     db = get_db()
-    db.executemany("INSERT OR REPLACE INTO weather(date, t, p) VALUES(?,?,?)", rows)
-    db.commit()
+    try:
+        db.executemany("INSERT OR REPLACE INTO weather(date, t, p) VALUES(?,?,?)", rows)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        db.close()
+        log.error("Weather DB write failed: %s", e)
+        raise
     db.close()
     log.info("Weather: %d days upserted", len(rows))
 
@@ -443,6 +468,12 @@ def main():
     parser.add_argument("--delete-cache", action="store_true")
     parser.add_argument("--source", choices=["eco", "cam", "weather", "all"], default="all")
     args = parser.parse_args()
+
+    free_mb = shutil.disk_usage(cfg.DB_PATH).free / 1024**2
+    if free_mb < 200:
+        log.error("Low disk space: %.0f MB free — aborting ingest to protect DB integrity", free_mb)
+        sys.exit(1)
+    log.info("Disk free: %.0f MB", free_mb)
 
     init_db()
 
@@ -461,6 +492,7 @@ def main():
     if args.source in ("all", "weather") and not args.no_weather:
         ingest_weather(delete_cache=args.delete_cache)
 
+    checkpoint_db()
     log.info("Done ✓")
 
 if __name__ == "__main__":
