@@ -143,10 +143,10 @@ def ingest_ecocounter():
         db.commit()
     except Exception as e:
         db.rollback()
-        db.close()
         log.error("Eco-counter DB write failed: %s", e)
         raise
-    db.close()
+    finally:
+        db.close()
     if rows_in:
         log.info("  Eco-counter: %d interval records upserted", len(rows_in) + len(rows_out))
         log.info("  Sample (last 3 rows_in): %s", rows_in[-3:])
