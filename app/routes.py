@@ -2,7 +2,7 @@ import importlib.util
 import os
 import re
 import sqlite3
-from datetime import date as _date
+from datetime import date as _date, timedelta as _timedelta
 
 from dotenv import load_dotenv
 import pathlib
@@ -16,6 +16,10 @@ _BW_DIR = pathlib.Path(__file__).parent.parent / "bikecounters_web"
 _spec = importlib.util.spec_from_file_location("bikecounters_web.config", _BW_DIR / "config.py")
 bw_cfg = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bw_cfg)
+
+_yoy_spec = importlib.util.spec_from_file_location("bikecounters_web.yoy", _BW_DIR / "yoy.py")
+bw_yoy = importlib.util.module_from_spec(_yoy_spec)
+_yoy_spec.loader.exec_module(bw_yoy)
 
 from app import app
 from app.train_delays import scrape_babitron_delays
@@ -81,6 +85,8 @@ def root():
         ("GET", "/bikecounters/api/daily/<loc_id>",          "Daily totals (combined + per-collector)"),
         ("GET", "/bikecounters/api/weather",                 "Weather data {date: {t, p}}"),
         ("GET", "/bikecounters/api/counts/<loc_id>?resolution=hourly&from=YYYY-MM-DD&to=YYYY-MM-DD", "Counts for a location with optional date range and hourly/daily resolution"),
+        ("GET", "/bikecounters/api/yoy",                     "Year-over-year summary (YTD, MTD) for all locations"),
+        ("GET", "/bikecounters/api/yoy/<loc_id>",            "Year-over-year monthly avg/day + YTD, MTD for a location"),
     ]
     lines = ["<pre>"]
     for method, path, desc in endpoints:
@@ -356,6 +362,71 @@ def api_weather():
     result = {r["date"]: {"t": r["t"], "p": r["p"]} for r in rows}
     return jsonify(result)
  
+# ── Year-over-year API ─────────────────────────────────────────────────────────
+
+def _daily_combined(source_ids):
+    """Return combined daily totals [{ts, bikes, scooters}] for the given sources."""
+    placeholders = ",".join("?" * len(source_ids))
+    return query(
+        f"""
+        SELECT substr(ts, 1, 10) AS ts,
+               SUM(bikes)        AS bikes,
+               SUM(scooters)     AS scooters
+        FROM counts
+        WHERE source_id IN ({placeholders})
+        GROUP BY substr(ts, 1, 10)
+        ORDER BY ts
+        """,
+        source_ids,
+    )
+
+
+def _location_yoy(loc, ref_date):
+    """Compute YoY stats for a location up to and including ref_date."""
+    source_ids = [c["source_id"] for c in loc["collectors"]]
+    daily = bw_yoy.daily_totals(_daily_combined(source_ids)) if source_ids else {}
+    return {
+        "monthly": bw_yoy.add_monthly_yoy(bw_yoy.monthly_stats(daily)),
+        "mtd":     bw_yoy.period_yoy(daily, ref_date.replace(day=1), ref_date),
+        "ytd":     bw_yoy.period_yoy(daily, ref_date.replace(month=1, day=1), ref_date),
+    }
+
+
+def _yoy_ref_date():
+    """Last complete day (yesterday)."""
+    return _date.today() - _timedelta(days=1)
+
+
+@app.route("/bikecounters/api/yoy/<loc_id>")
+def api_yoy_location(loc_id):
+    """Return monthly avg/day with YoY change, plus matched-day MTD and YTD comparison."""
+    loc = bw_cfg.LOCATION_BY_ID.get(loc_id)
+    if not loc:
+        abort(404)
+    ref_date = _yoy_ref_date()
+    return jsonify({"ref_date": ref_date.isoformat(), **_location_yoy(loc, ref_date)})
+
+
+@app.route("/bikecounters/api/yoy")
+@cache.cached(timeout=3600)
+def api_yoy_all():
+    """Return matched-day YTD and MTD comparison for every location with collectors."""
+    ref_date = _yoy_ref_date()
+    result = []
+    for loc in bw_cfg.LOCATIONS:
+        if not loc["collectors"]:
+            continue
+        stats = _location_yoy(loc, ref_date)
+        result.append({
+            "id":    loc["id"],
+            "name":  loc["name"],
+            "type":  loc["type"],
+            "color": loc["color"],
+            "ytd":   stats["ytd"],
+            "mtd":   stats["mtd"],
+        })
+    return jsonify({"ref_date": ref_date.isoformat(), "locations": result})
+
 # ── Debug endpoint ────────────────────────────────────────────────────────────
  
 @app.route("/bikecounters/api/debug/<loc_id>")
