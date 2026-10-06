@@ -83,7 +83,9 @@ def parse_scheduled_actual_times(scheduled_actual_text):
 
 
 def source_page_from_url(url):
-    lowered = url.lower()
+    lowered = url.lower().rstrip("/")
+    if lowered.endswith(".html"):
+        lowered = lowered[: -len(".html")]
     if lowered.endswith("zponlineos"):
         return "zponlineos"
     return "zponline"
@@ -98,7 +100,10 @@ def scrape_babitron_delays(url):
     if response.status_code != 200:
         raise Exception(f"Chyba při stahování stránky: {response.status_code}")
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    # Babitron neposílá charset v hlavičce, stránky jsou ale v UTF-8.
+    response.encoding = "utf-8"
+    # html5lib korektně uzavírá implicitně neukončené <TD>, html.parser je vnořuje.
+    soup = BeautifulSoup(response.text, "html5lib")
     tables = soup.find_all("table", {"align": "CENTER", "bgcolor": "0000ff"})
 
     if not tables:
