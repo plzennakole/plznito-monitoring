@@ -9,6 +9,7 @@ and camera-based detectors from the Plzeň open data portal, with ČHMÚ weather
 |---|---|
 | `config.py` | Location definitions, collector mappings, colors |
 | `ingest.py` | Downloads all data sources → SQLite (`cyklo.db`) |
+| `yoy.py` | Year-over-year stats (monthly avg/day, matched-day YTD/MTD) |
 | `templates/index.html` | Single-page frontend (Chart.js) |
 | `run_update.sh` | Cron-friendly ingest wrapper |
 

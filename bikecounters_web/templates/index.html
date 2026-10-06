@@ -18,6 +18,7 @@
   --green-dim: #1a6629;
   --amber:     #e3b341;
   --blue:      #58a6ff;
+  --red:       #f85149;
   --muted:     #6e7681;
   --text:      #e6edf3;
   --text-soft: #8b949e;
@@ -195,6 +196,57 @@ body {
   padding: 1px 6px;
 }
 .chip-dot { width: 5px; height: 5px; border-radius: 50%; }
+.chip.up   { color: var(--green); border-color: var(--green-dim); }
+.chip.down { color: var(--red);   border-color: color-mix(in srgb, var(--red) 40%, transparent); }
+.chip.up, .chip.down { cursor: help; }
+
+/* ── YoY section ── */
+.yoy-section { margin-top: 1.5rem; }
+
+/* ── Overview table ── */
+.overview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.75rem;
+}
+.overview-table th {
+  text-align: right;
+  font-weight: 400;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.overview-table td {
+  text-align: right;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+.overview-table th:first-child, .overview-table td:first-child { text-align: left; }
+.overview-table tbody tr { cursor: pointer; transition: background 0.12s; }
+.overview-table tbody tr:hover { background: var(--surface2); }
+.overview-table tbody tr:last-child td { border-bottom: none; }
+.overview-name { display: flex; align-items: center; gap: 0.5rem; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 0.82rem; }
+.overview-type { font-size: 0.6rem; color: var(--muted); letter-spacing: 0.06em; }
+.pct-up   { color: var(--green); }
+.pct-down { color: var(--red); }
+.pct-bar {
+  position: relative;
+  width: 90px;
+  height: 8px;
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 0.5rem;
+  background: linear-gradient(var(--border2), var(--border2)) center / 1px 100% no-repeat;
+}
+.pct-bar > div { position: absolute; top: 0; height: 100%; border-radius: 2px; }
+.table-wrap { overflow-x: auto; }
 
 /* ── Chart section ── */
 .chart-section {
@@ -383,6 +435,7 @@ let currentLocId  = null;
 let currentData   = null;  // {combined: [...], collectors: [...]}
 let dailyData     = null;  // always full daily dataset, used by stat cards
 let currentLoc    = null;  // location metadata
+let yoyData       = null;  // {ref_date, monthly: [...], mtd, ytd}
 
 let isCombined    = true;
 let resolution    = 'daily';  // 'hourly' | 'daily'
@@ -392,6 +445,10 @@ let viewEndDate   = null;
 let currentDates  = [];
 
 let chart = null;
+let yoyChart = null;
+
+const OVERVIEW_ID  = 'overview';
+const MONTH_NAMES  = ['led','úno','bře','dub','kvě','čvn','čvc','srp','zář','říj','lis','pro'];
 
 // ── Date helpers ───────────────────────────────────────────────────────────────
 function today() {
@@ -407,6 +464,11 @@ function subDays(ds, n){ const d = new Date(ds+'T00:00:00'); d.setDate(d.getDate
 function addDays(ds, n){ const d = new Date(ds+'T00:00:00'); d.setDate(d.getDate()+n); return toDs(d); }
 function monthOf(ds)   { return ds.slice(0,7); }
 function yearOf(ds)    { return ds.slice(0,4); }
+function fmtPct(p) {
+  const v = Math.abs(p).toLocaleString('cs-CZ', { maximumFractionDigits: 1 });
+  return p >= 0 ? `▲ +${v} %` : `▼ −${v} %`;
+}
+function pctClass(p)   { return p >= 0 ? 'up' : 'down'; }
 
 // ── API ────────────────────────────────────────────────────────────────────────
 async function apiFetch(url) {
@@ -424,6 +486,11 @@ async function loadNav() {
 function renderNav() {
   const tree = document.getElementById('nav-tree');
   tree.innerHTML = '';
+  const overviewSec = document.createElement('div');
+  overviewSec.className = 'nav-section';
+  overviewSec.textContent = 'PŘEHLED';
+  tree.appendChild(overviewSec);
+  tree.appendChild(buildNavItem({ id: OVERVIEW_ID, name: 'Meziroční srovnání', icon: '📊' }));
   for (const section of navData) {
     const secEl = document.createElement('div');
     secEl.className = 'nav-section';
@@ -501,9 +568,23 @@ async function selectLocation(locId) {
   viewEndDate = null;
   currentData = null;
   dailyData   = null;
+  yoyData     = null;
   renderSkeleton();
   try {
-    currentLoc = await apiFetch(`/bikecounters/api/location/${locId}`);
+    if (locId === OVERVIEW_ID) {
+      await renderOverview();
+      return;
+    }
+    // YoY is optional — a failure there must not break the rest of the page.
+    const [loc, yoy] = await Promise.all([
+      apiFetch(`/bikecounters/api/location/${locId}`),
+      apiFetch(`/bikecounters/api/yoy/${locId}`).catch(err => {
+        console.error('Failed to load YoY data.', err);
+        return null;
+      }),
+    ]);
+    currentLoc = loc;
+    yoyData    = yoy;
     await fetchCounts();
     renderPage();
   } catch(e) {
@@ -591,19 +672,40 @@ function renderPage() {
       </div>
     </div>
 
+    <div class="chart-section yoy-section">
+      <div class="chart-head">
+        <span class="chart-title">MEZIROČNÍ SROVNÁNÍ · PRŮMĚR/DEN</span>
+      </div>
+      <div class="chart-legend" id="yoy-legend"></div>
+      <div class="chart-body">
+        <canvas id="yoy-canvas"></canvas>
+      </div>
+    </div>
+
     <div class="data-note" id="data-note">Data: <span id="data-range">…</span></div>
 
+    ${footerHtml()}
+  `;
+
+  destroyCharts();
+  initChart();
+  updateChart();
+  renderStatCards();
+  renderYoyChart();
+}
+
+function destroyCharts() {
+  if (chart)    { chart.destroy();    chart = null; }
+  if (yoyChart) { yoyChart.destroy(); yoyChart = null; }
+}
+
+function footerHtml() {
+  return `
     <footer>
       Zdroj: <a href="https://opendata.plzen.eu/" target="_blank">opendata.plzen.eu</a>
       &nbsp;·&nbsp; Počasí: <a href="https://opendata.chmi.cz/" target="_blank">opendata.chmi.cz</a>
       stanice Plzeň-Mikulka (WMO 11450) &nbsp;·&nbsp; ČHMÚ CC BY 4.0
-    </footer>
-  `;
-
-  if (chart) { chart.destroy(); chart = null; }
-  initChart();
-  updateChart();
-  renderStatCards();
+    </footer>`;
 }
 
 // ── Stat cards ─────────────────────────────────────────────────────────────────
@@ -636,10 +738,13 @@ function renderStatCards() {
   const col = currentLoc.color;
   const periods = [
     { label: 'Včera',              period: yStr,                   data: yd  },
-    { label: 'Tento měsíc',        period: mStr,                   data: mo  },
-    { label: 'Tento rok',          period: yr,                     data: cal },
+    { label: 'Tento měsíc',        period: mStr,                   data: mo,  yoy: yoyData?.mtd },
+    { label: 'Tento rok',          period: yr,                     data: cal, yoy: yoyData?.ytd },
     { label: 'Posledních 365 dní', period: `${d365str} – ${yStr}`, data: ytd },
   ];
+  const yoyChip = y => y?.pct == null ? '' :
+    `<span class="chip ${pctClass(y.pct)}"
+           title="Srovnání ${y.days} shodných dní: ${fmt(y.current)} vs. ${fmt(y.previous)} loni">${fmtPct(y.pct)} vs. loni</span>`;
 
   document.getElementById('stat-cards').innerHTML = periods.map(p => `
     <div class="stat-card">
@@ -652,6 +757,7 @@ function renderStatCards() {
       <div class="stat-card-chips">
         <span class="chip"><span class="chip-dot" style="background:${col}"></span>kola ${fmt(p.data.bikes)}</span>
         <span class="chip"><span class="chip-dot" style="background:#58a6ff"></span>koloběžky ${fmt(p.data.scooters)}</span>
+        ${yoyChip(p.yoy)}
       </div>
     </div>`).join('');
 
@@ -661,83 +767,213 @@ function renderStatCards() {
 }
 
 // ── Chart ──────────────────────────────────────────────────────────────────────
+// Shared look for all charts; callers add callbacks and extra scales.
+function baseChartOptions() {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    animation: { duration: 200, easing: 'easeInOutQuart' },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: '#1c2128',
+        borderColor: '#30363d', borderWidth: 1,
+        titleColor: '#8b949e', bodyColor: '#e6edf3',
+        titleFont: { family: "'DM Mono', monospace", size: 11 },
+        bodyFont:  { family: "'DM Mono', monospace", size: 12 },
+        padding: 10,
+      },
+    },
+    scales: {
+      x: {
+        grid:  { color: '#21262d' },
+        ticks: { color: '#6e7681', font: { family: "'DM Mono', monospace", size: 10 },
+                 maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+        border: { color: '#30363d' },
+      },
+      y: {
+        grid:  { color: '#21262d' },
+        ticks: { color: '#6e7681', font: { family: "'DM Mono', monospace", size: 10 },
+                 callback: v => v.toLocaleString('cs-CZ') },
+        border: { color: '#30363d' },
+        beginAtZero: true,
+      },
+    },
+  };
+}
+
 function initChart() {
   const ctx = document.getElementById('chart-canvas').getContext('2d');
+  const options = baseChartOptions();
+  options.plugins.tooltip.callbacks = {
+    title: items => {
+      const ts = currentDates[items[0]?.dataIndex];
+      if (!ts) return items[0]?.label ?? '';
+      const dayNames = ['ne','po','út','st','čt','pá','so'];
+      const dateStr = ts.slice(0, 10);               // 'YYYY-MM-DD'
+      const dn = dayNames[new Date(dateStr + 'T12:00:00').getDay()];
+      const [y, m, d] = dateStr.split('-');
+      const dateFmt = `${d}.${m}.${y.slice(2)}`;
+      if (resolution === 'hourly') {
+        const hour = ts.slice(11, 13);               // 'HH'
+        return `${dateFmt}  ${dn}  ${hour}:00`;
+      }
+      return `${dateFmt}  ${dn}`;
+    },
+    label: item => {
+      if (item.dataset.yAxisID === 'y1') {
+        const v = item.parsed.y;
+        return v == null ? null : ` 🌡 ${v.toFixed(1)} °C`;
+      }
+      if (item.dataset.yAxisID === 'y2') {
+        const v = item.parsed.y;
+        return v == null ? null : ` 💧 ${v.toFixed(1)} mm`;
+      }
+      return ` ${item.dataset.label}: ${item.parsed.y?.toLocaleString('cs-CZ') ?? '—'}`;
+    },
+    filter: item => item.parsed.y != null,
+  };
+  options.scales.y1 = {
+    type: 'linear', display: false, position: 'right',
+    grid: { drawOnChartArea: false },
+    ticks: { color: '#e3b341', font: { family: "'DM Mono', monospace", size: 10 },
+             callback: v => v.toFixed(0) + '°' },
+    border: { color: '#e3b34150' },
+  };
+  options.scales.y2 = {
+    type: 'linear', display: false, position: 'left',
+    beginAtZero: true,
+  };
   chart = new Chart(ctx, {
     type: 'line',
     data: { labels: [], datasets: [] },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      animation: { duration: 200, easing: 'easeInOutQuart' },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#1c2128',
-          borderColor: '#30363d', borderWidth: 1,
-          titleColor: '#8b949e', bodyColor: '#e6edf3',
-          titleFont: { family: "'DM Mono', monospace", size: 11 },
-          bodyFont:  { family: "'DM Mono', monospace", size: 12 },
-          padding: 10,
-          callbacks: {
-            title: items => {
-              const ts = currentDates[items[0]?.dataIndex];
-              if (!ts) return items[0]?.label ?? '';
-              const dayNames = ['ne','po','út','st','čt','pá','so'];
-              const dateStr = ts.slice(0, 10);               // 'YYYY-MM-DD'
-              const dn = dayNames[new Date(dateStr + 'T12:00:00').getDay()];
-              const [y, m, d] = dateStr.split('-');
-              const dateFmt = `${d}.${m}.${y.slice(2)}`;
-              if (resolution === 'hourly') {
-                const hour = ts.slice(11, 13);               // 'HH'
-                return `${dateFmt}  ${dn}  ${hour}:00`;
-              }
-              return `${dateFmt}  ${dn}`;
-            },
-            label: item => {
-              if (item.dataset.yAxisID === 'y1') {
-                const v = item.parsed.y;
-                return v == null ? null : ` 🌡 ${v.toFixed(1)} °C`;
-              }
-              if (item.dataset.yAxisID === 'y2') {
-                const v = item.parsed.y;
-                return v == null ? null : ` 💧 ${v.toFixed(1)} mm`;
-              }
-              return ` ${item.dataset.label}: ${item.parsed.y?.toLocaleString('cs-CZ') ?? '—'}`;
-            },
-            filter: item => item.parsed.y != null,
-          },
-        },
-      },
-      scales: {
-        x: {
-          grid:  { color: '#21262d' },
-          ticks: { color: '#6e7681', font: { family: "'DM Mono', monospace", size: 10 },
-                   maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
-          border: { color: '#30363d' },
-        },
-        y: {
-          grid:  { color: '#21262d' },
-          ticks: { color: '#6e7681', font: { family: "'DM Mono', monospace", size: 10 },
-                   callback: v => v.toLocaleString('cs-CZ') },
-          border: { color: '#30363d' },
-          beginAtZero: true,
-        },
-        y1: {
-          type: 'linear', display: false, position: 'right',
-          grid: { drawOnChartArea: false },
-          ticks: { color: '#e3b341', font: { family: "'DM Mono', monospace", size: 10 },
-                   callback: v => v.toFixed(0) + '°' },
-          border: { color: '#e3b34150' },
-        },
-        y2: {
-          type: 'linear', display: false, position: 'left',
-          beginAtZero: true,
-        },
-      },
-    },
+    options,
   });
+}
+
+// ── YoY chart ──────────────────────────────────────────────────────────────────
+function yoyYearColor(year, lastYear) {
+  if (year === lastYear)     return currentLoc.color;
+  if (year === lastYear - 1) return currentLoc.color + '73';  // ~45 % alpha
+  return '#6e7681';
+}
+
+function renderYoyChart() {
+  const canvas = document.getElementById('yoy-canvas');
+  const monthly = yoyData?.monthly || [];
+  if (!canvas || !monthly.length) {
+    canvas?.closest('.chart-body')?.replaceChildren(
+      Object.assign(document.createElement('div'), { className: 'empty-state', textContent: 'Žádná data' }));
+    return;
+  }
+
+  const years = [...new Set(monthly.map(m => m.year))].sort();
+  const lastYear = years.at(-1);
+  const datasets = years.map(year => {
+    // entries[i] = stats for month i+1 (or undefined)
+    const entries = Array.from({ length: 12 }, (_, i) =>
+      monthly.find(m => m.year === year && m.month === i + 1));
+    const color = yoyYearColor(year, lastYear);
+    return {
+      label: String(year),
+      data: entries.map(e => e?.avg ?? null),
+      entries,
+      backgroundColor: color,
+      borderRadius: 3,
+      categoryPercentage: 0.7,
+      barPercentage: 0.9,
+    };
+  });
+
+  const options = baseChartOptions();
+  options.scales.x.ticks.maxTicksLimit = 12;
+  options.plugins.tooltip.callbacks = {
+    title: items => MONTH_NAMES[items[0].dataIndex],
+    label: item => {
+      const e = item.dataset.entries[item.dataIndex];
+      const pct = e.pct == null ? '' : ` · ${fmtPct(e.pct)} vs. ${e.year - 1}`;
+      return ` ${e.year}: ${fmt(Math.round(e.avg))} /den (${e.days} dní)${pct}`;
+    },
+    filter: item => item.parsed.y != null,
+  };
+
+  yoyChart = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: { labels: MONTH_NAMES, datasets },
+    options,
+  });
+
+  document.getElementById('yoy-legend').innerHTML = years.map(y => `
+    <div class="legend-item"><div class="legend-bar" style="background:${yoyYearColor(y, lastYear)};opacity:1"></div>${y}</div>`
+  ).join('');
+}
+
+// ── Overview ───────────────────────────────────────────────────────────────────
+function pctBar(pct, maxAbs) {
+  if (pct == null) return '';
+  const w = maxAbs > 0 ? Math.abs(pct) / maxAbs * 50 : 0;
+  const side = pct >= 0 ? `left:50%` : `right:50%`;
+  const color = pct >= 0 ? 'var(--green)' : 'var(--red)';
+  return `<span class="pct-bar"><div style="${side};width:${w}%;background:${color}"></div></span>`;
+}
+
+function pctCell(p) {
+  return p == null ? '—' : `<span class="pct-${pctClass(p)}">${fmtPct(p)}</span>`;
+}
+
+async function renderOverview() {
+  destroyCharts();
+  currentLoc = null;
+  const data = await apiFetch('/bikecounters/api/yoy');
+  const rows = [...data.locations].sort((a, b) =>
+    (b.ytd.pct ?? -Infinity) - (a.ytd.pct ?? -Infinity));
+  const maxAbs = Math.max(0, ...rows.map(r => Math.abs(r.ytd.pct ?? 0)));
+  const [y, m, d] = data.ref_date.split('-');
+
+  document.getElementById('app').innerHTML = `
+    <div class="content-header">
+      <h2>Meziroční srovnání</h2>
+      <span class="source-badge">1.1. – ${+d}.${+m}.${y} vs. loni</span>
+    </div>
+
+    <div class="chart-section">
+      <div class="table-wrap">
+        <table class="overview-table">
+          <thead><tr>
+            <th>Lokalita</th>
+            <th>Letos</th>
+            <th>Loni</th>
+            <th>Změna od 1.1.</th>
+            <th>Shodných dní</th>
+            <th>Tento měsíc</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map(r => `
+              <tr data-loc-id="${r.id}">
+                <td><span class="overview-name"><span class="nav-dot" style="--item-color:${r.color}"></span>${r.name}
+                  <span class="overview-type">${r.type === 'ecocounter' ? 'ECO' : 'KAMERA'}</span></span></td>
+                <td>${r.ytd.days ? fmt(r.ytd.current) : '—'}</td>
+                <td>${r.ytd.days ? fmt(r.ytd.previous) : '—'}</td>
+                <td>${pctCell(r.ytd.pct)}${pctBar(r.ytd.pct, maxAbs)}</td>
+                <td>${r.ytd.days}</td>
+                <td title="${r.mtd.days} shodných dní">${pctCell(r.mtd.pct)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="data-note">
+      Srovnávají se jen <span>shodné dny</span> — dny, kdy lokalita měřila v obou letech
+      (výpadky kamer a chybějící data se vynechávají). Hodnoty = kola + koloběžky.
+    </div>
+
+    ${footerHtml()}
+  `;
+
+  document.querySelectorAll('.overview-table tbody tr').forEach(tr =>
+    tr.addEventListener('click', () => selectLocation(tr.dataset.locId)));
 }
 
 function buildDatasets(filtered) {
@@ -970,11 +1206,7 @@ function setDirection(combined) {
     .catch(() => {});
 
   await loadNav();
-
-  // Auto-select first eco-counter location
-  const firstEco = navData
-    .find(s => s.label === 'ECO-COUNTER')?.items?.[0];
-  if (firstEco) selectLocation(firstEco.id);
+  selectLocation(OVERVIEW_ID);
 })();
 </script>
 </body>
