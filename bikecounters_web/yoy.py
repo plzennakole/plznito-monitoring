@@ -50,7 +50,7 @@ def monthly_stats(daily: dict[date, int]) -> list[dict]:
     ]
 
 
-def _pct_change(current: float, previous: float) -> float | None:
+def _pct_change(current: float, previous: float) -> "float | None":
     """
     Compute a percentage change rounded to one decimal.
 
