@@ -38,10 +38,10 @@ def _env_int(name, default):
 
 
 TRAIN_DELAYS_SOURCE_R_URL = (
-    os.getenv("TRAIN_DELAYS_SOURCE_R_URL") or "https://kam.mff.cuni.cz/~babilon/zponline"
+    os.getenv("TRAIN_DELAYS_SOURCE_R_URL") or "https://babitron.kam.mff.cuni.cz/zponline.html"
 )
 TRAIN_DELAYS_SOURCE_OS_URL = (
-    os.getenv("TRAIN_DELAYS_SOURCE_OS_URL") or "https://kam.mff.cuni.cz/~babilon/zponlineos"
+    os.getenv("TRAIN_DELAYS_SOURCE_OS_URL") or "https://babitron.kam.mff.cuni.cz/zponlineos.html"
 )
 CACHE_TIMEOUT_SECONDS = max(_env_int("TRAIN_DELAYS_CACHE_TIMEOUT_SECONDS", 60), 1)
 CORS_ALLOW_ORIGIN = os.getenv("TRAIN_DELAYS_CORS_ALLOW_ORIGIN") or "*"

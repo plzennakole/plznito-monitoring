@@ -3,6 +3,7 @@ flask-caching
 folium
 requests
 beautifulsoup4
+html5lib
 fake-headers
 tqdm
 simplejson
