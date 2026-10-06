@@ -12,7 +12,7 @@ You are an expert Python developer working on an R&D project. Your goal is to wr
 ## Code Style & Formatting
 * **Standard:** Strictly follow PEP8.
 * **File Headers:** Every Python file MUST start with the following header:
-  `# Copyright 2024 Pexeso Inc. All rights reserved.` *(Note: Update year to current year if writing new files)*
+  `# Copyright 2024 Plzeň na kole Inc. All rights reserved.` *(Note: Update year to current year if writing new files)*
 * **Imports:** * Use absolute imports. Never use wildcard imports (`from module import *`).
   * Group imports strictly in this order, separated by a blank line:
     1. Standard library imports

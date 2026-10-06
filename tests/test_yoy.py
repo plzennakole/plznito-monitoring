@@ -1,4 +1,3 @@
-# Copyright 2026 Pexeso Inc. All rights reserved.
 import importlib.util
 import pathlib
 from datetime import date

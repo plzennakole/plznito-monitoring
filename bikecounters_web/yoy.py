@@ -1,4 +1,3 @@
-# Copyright 2026 Pexeso Inc. All rights reserved.
 """
 yoy.py — Year-over-year comparison of daily counter totals.
 

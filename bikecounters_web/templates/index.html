@@ -575,9 +575,13 @@ async function selectLocation(locId) {
       await renderOverview();
       return;
     }
+    // YoY is optional — a failure there must not break the rest of the page.
     const [loc, yoy] = await Promise.all([
       apiFetch(`/bikecounters/api/location/${locId}`),
-      apiFetch(`/bikecounters/api/yoy/${locId}`),
+      apiFetch(`/bikecounters/api/yoy/${locId}`).catch(err => {
+        console.error('Failed to load YoY data.', err);
+        return null;
+      }),
     ]);
     currentLoc = loc;
     yoyData    = yoy;
