@@ -27,16 +27,32 @@ _PAGE_HTML = (
 )
 
 
-def _mock_response(text: str, status_code: int = 200) -> MagicMock:
-    response = MagicMock()
-    response.status_code = status_code
-    # Bytes decoded as latin-1 imitate requests' guess when no charset is sent.
-    response.text = text.encode('utf-8').decode('latin-1')
-    type(response).encoding = property(
-        lambda self: None,
-        lambda self, value: setattr(self, 'text', text),
-    )
-    return response
+class _MockResponse:
+    def __init__(self, text: str, status_code: int = 200) -> None:
+        self.status_code = status_code
+        self._original_text = text
+        # Bytes decoded as latin-1 imitate requests' guess when no charset is sent.
+        self._text = text.encode("utf-8").decode("latin-1")
+        self._encoding: str | None = None
+
+    @property
+    def text(self) -> str:
+        return self._text
+
+    @property
+    def encoding(self) -> str | None:
+        return self._encoding
+
+    @encoding.setter
+    def encoding(self, value: str | None) -> None:
+        self._encoding = value
+        if value is not None:
+            # Mimic requests: setting encoding affects subsequent `.text` decoding.
+            self._text = self._original_text
+
+
+def _mock_response(text: str, status_code: int = 200) -> _MockResponse:
+    return _MockResponse(text=text, status_code=status_code)
 
 
 # ── parsing helpers ───────────────────────────────────────────────────────────
