@@ -3,7 +3,8 @@ from unittest.mock import patch
 
 import pytest
 
-from app import routes
+from app import bikecounters
+from app.extensions import cache
 from bikecounters_web import yoy
 
 
@@ -112,7 +113,7 @@ def test_period_yoy(daily: dict, start: date, end: date, expected: dict) -> None
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 def test_api_yoy_location_unknown_returns_404(client) -> None:
-    with patch.object(routes, 'query') as mock_query:
+    with patch.object(bikecounters, 'query') as mock_query:
         response = client.get('/bikecounters/api/yoy/does_not_exist')
     assert response.status_code == 404
     mock_query.assert_not_called()
@@ -120,8 +121,8 @@ def test_api_yoy_location_unknown_returns_404(client) -> None:
 
 def test_api_yoy_location_shape(client) -> None:
     rows = [_row('2025-06-01', 100), _row('2026-06-01', 110)]
-    with patch.object(routes, 'query', return_value=rows), \
-            patch.object(routes, '_yoy_ref_date', return_value=date(2026, 6, 30)):
+    with patch.object(bikecounters, 'query', return_value=rows), \
+            patch.object(bikecounters, '_yoy_ref_date', return_value=date(2026, 6, 30)):
         response = client.get('/bikecounters/api/yoy/eco_prazdroj')
     body = response.get_json()
     assert response.status_code == 200
@@ -132,7 +133,7 @@ def test_api_yoy_location_shape(client) -> None:
 
 
 def test_api_yoy_location_without_collectors(client) -> None:
-    with patch.object(routes, 'query') as mock_query:
+    with patch.object(bikecounters, 'query') as mock_query:
         response = client.get('/bikecounters/api/yoy/cam_malesice')
     body = response.get_json()
     assert response.status_code == 200
@@ -142,13 +143,13 @@ def test_api_yoy_location_without_collectors(client) -> None:
 
 
 def test_api_yoy_all_skips_locations_without_collectors(client) -> None:
-    routes.cache.clear()
-    with patch.object(routes, 'query', return_value=[]):
+    cache.clear()
+    with patch.object(bikecounters, 'query', return_value=[]):
         response = client.get('/bikecounters/api/yoy')
     ids = [loc['id'] for loc in response.get_json()['locations']]
     assert 'cam_malesice' not in ids
     assert 'eco_prazdroj' in ids
-    routes.cache.clear()
+    cache.clear()
 
 
 def test_bikecounters_page(client) -> None:

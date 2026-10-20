@@ -4,7 +4,8 @@ from collections.abc import Iterator
 import pytest
 from flask.testing import FlaskClient
 
-from app import app, routes
+from app import app
+from app.extensions import cache
 
 
 @pytest.fixture
@@ -14,8 +15,8 @@ def client() -> Iterator[FlaskClient]:
 
     :return: Test client for the app.
     """
-    routes.cache.clear()
+    cache.clear()
     app.config['TESTING'] = True
     with app.test_client() as test_client:
         yield test_client
-    routes.cache.clear()
+    cache.clear()

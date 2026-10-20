@@ -18,17 +18,15 @@ select = ["E", "F", "W", "I", "B", "UP"]
 [tool.ruff.lint.per-file-ignores]
 # Flask app: routes register themselves on import, after `app` exists.
 "app/__init__.py" = ["E402", "F401"]
-# Whitespace and long lines, cleaned up together with the blueprint split.
-"app/routes.py" = ["W293", "E501"]
 
 [tool.mypy]
 python_version = "3.13"
-files = ["app", "plznito_monitoring", "bikecounters_web"]
+files = ["app", "plznito_monitoring", "bikecounters_web", "run_flask.py"]
 ignore_missing_imports = true
 
 # Fully typed modules; extend this list as modules get type hints.
 [[tool.mypy.overrides]]
-module = ["app.plznito_api", "app.plznito_store", "plznito_monitoring.*"]
+module = ["app.*", "plznito_monitoring.*", "run_flask"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 warn_return_any = true

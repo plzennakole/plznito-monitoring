@@ -1,9 +1,9 @@
-# Copyright 2026 Pexeso Inc. All rights reserved.
+# Copyright 2026 Plzeň na kole Inc. All rights reserved.
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app import routes, train_delays
+from app import cors, train_delays, train_delays_api
 
 # Markup mirrors the real Babitron page: uppercase tags, unquoted attributes
 # and <TD> cells that are never explicitly closed.
@@ -166,13 +166,13 @@ def test_scrape_returns_empty_dict_when_table_missing(mock_get: MagicMock) -> No
 def test_scrape_raises_on_http_error(mock_get: MagicMock) -> None:
     mock_get.return_value = _mock_response("", status_code=503)
 
-    with pytest.raises(Exception, match='503'):
+    with pytest.raises(train_delays.TrainDelaysScrapeError, match='503'):
         train_delays.scrape_babitron_delays('https://example.com/zponline.html')
 
 
 # ── /train_delays/ endpoint ───────────────────────────────────────────────────
 
-@patch('app.routes.scrape_babitron_delays')
+@patch('app.train_delays_api.scrape_babitron_delays')
 def test_endpoint_merges_both_sources(mock_scrape: MagicMock, client) -> None:
     mock_scrape.side_effect = [
         {'rj 55': {'source_page': 'zponline'}, 'Os 1': {'source_page': 'zponline'}},
@@ -182,17 +182,17 @@ def test_endpoint_merges_both_sources(mock_scrape: MagicMock, client) -> None:
     response = client.get('/train_delays/')
 
     assert response.status_code == 200
-    assert response.headers['Access-Control-Allow-Origin'] == routes.CORS_ALLOW_ORIGIN
+    assert response.headers['Access-Control-Allow-Origin'] == cors.CORS_ALLOW_ORIGIN
     # The OS page wins on duplicate keys.
     assert response.get_json() == {
         'rj 55': {'source_page': 'zponline'},
         'Os 1': {'source_page': 'zponlineos'},
     }
     called_urls = [call.args[0] for call in mock_scrape.call_args_list]
-    assert called_urls == [routes.TRAIN_DELAYS_SOURCE_R_URL, routes.TRAIN_DELAYS_SOURCE_OS_URL]
+    assert called_urls == [train_delays_api.TRAIN_DELAYS_SOURCE_R_URL, train_delays_api.TRAIN_DELAYS_SOURCE_OS_URL]
 
 
-@patch('app.routes.scrape_babitron_delays')
+@patch('app.train_delays_api.scrape_babitron_delays')
 def test_endpoint_is_cached(mock_scrape: MagicMock, client) -> None:
     mock_scrape.return_value = {}
 
@@ -202,7 +202,7 @@ def test_endpoint_is_cached(mock_scrape: MagicMock, client) -> None:
     assert mock_scrape.call_count == 2  # one call per source, only on the first request
 
 
-@patch('app.routes.scrape_babitron_delays')
+@patch('app.train_delays_api.scrape_babitron_delays')
 def test_endpoint_options_preflight(mock_scrape: MagicMock, client) -> None:
     response = client.options('/train_delays/')
 
@@ -210,7 +210,7 @@ def test_endpoint_options_preflight(mock_scrape: MagicMock, client) -> None:
     assert 'GET' in response.headers['Access-Control-Allow-Methods']
 
 
-@patch('app.routes.scrape_babitron_delays')
+@patch('app.train_delays_api.scrape_babitron_delays')
 def test_endpoint_options_preflight_is_not_cached_for_get(mock_scrape: MagicMock, client) -> None:
     mock_scrape.return_value = {'Os 1': {'source_page': 'zponline'}}
 

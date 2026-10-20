@@ -11,6 +11,7 @@ from flask_smorest import Blueprint, abort
 from marshmallow import Schema, fields, validate
 from werkzeug.wrappers import Response
 
+from app.cors import add_cors_headers
 from app.plznito_store import PLZNITO_TZ, IssueNotFoundError, IssueStore, db_path_from_env, filter_issues
 
 CACHE_MAX_AGE_SECONDS = 300
@@ -19,6 +20,8 @@ blp = Blueprint(
     'plznito_api', __name__, url_prefix='/plznito/api',
     description="Issues reported to Plznito (plznito.cz), refreshed every few hours.",
 )
+
+blp.after_request(add_cors_headers)
 
 _stores: dict[pathlib.Path, IssueStore] = {}
 

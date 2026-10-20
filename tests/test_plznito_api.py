@@ -139,3 +139,7 @@ def test_openapi_lists_endpoints(client: FlaskClient) -> None:
         '/plznito/api/issues', '/plznito/api/issues/new', '/plznito/api/issues/{issue_id}',
         '/plznito/api/meta',
     }
+
+
+def test_api_sends_cors_headers(client: FlaskClient) -> None:
+    assert client.get('/plznito/api/meta').headers['Access-Control-Allow-Origin']
