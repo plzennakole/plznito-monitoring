@@ -189,4 +189,3 @@ def scrape_babitron_delays(url: str) -> dict[str, dict[str, Any]]:
             }
 
     return results
-

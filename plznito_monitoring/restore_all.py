@@ -145,8 +145,13 @@ def main() -> None:
     parser.add_argument("--data_dir", type=str, default=os.path.join(os.path.dirname(__file__), "data"))
     parser.add_argument("--start-id", type=int, required=True)
     parser.add_argument("--end-id", type=int, required=True)
-    parser.add_argument("--source", type=str, default="auto", choices=["auto", "api", "web"],
-                        help="Fetch source: auto (API fallback to web), api, or web.")
+    parser.add_argument(
+        "--source",
+        type=str,
+        default="auto",
+        choices=["auto", "api", "web"],
+        help="Fetch source: auto (API fallback to web), api, or web.",
+    )
     args = parser.parse_args()
 
     os.makedirs(args.data_dir, exist_ok=True)

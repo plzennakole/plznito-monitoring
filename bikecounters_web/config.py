@@ -1,27 +1,34 @@
 """
 config.py — Location definitions for Plzeň cycling counters
 """
+
 from pathlib import Path
 from typing import Any
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-BASE_DIR   = Path(__file__).parent
-DB_PATH    = BASE_DIR / "cyklo.db"
+BASE_DIR = Path(__file__).parent
+DB_PATH = BASE_DIR / "cyklo.db"
 
 # ── ČHMÚ ──────────────────────────────────────────────────────────────────────
-CHMI_STATION     = "11450"   # Plzeň-Mikulka
-CHMI_HIST_BASE   = "https://opendata.chmi.cz/meteorology/climate/historical_csv/data/daily"
+CHMI_STATION = "11450"  # Plzeň-Mikulka
+CHMI_HIST_BASE = "https://opendata.chmi.cz/meteorology/climate/historical_csv/data/daily"
 CHMI_RECENT_BASE = "https://opendata.chmi.cz/meteorology/climate/recent/data/daily"
-CHMI_CACHE_DIR   = BASE_DIR / "chmi_cache"
+CHMI_CACHE_DIR = BASE_DIR / "chmi_cache"
 
 # ── Source URLs ────────────────────────────────────────────────────────────────
-ECO_URL    = "https://opendata.plzen.eu/public/opendata/ecocounter-traffic"
+ECO_URL = "https://opendata.plzen.eu/public/opendata/ecocounter-traffic"
 CAMERA_URL = "https://opendata.plzen.eu/public/opendata/camera-view/{cam_id}"
 
 # ── Color palette for direction lines ─────────────────────────────────────────
 PALETTE = [
-    "#39d353", "#58a6ff", "#ffa657", "#f78166",
-    "#d2a8ff", "#79c0ff", "#e3b341", "#ff7b72",
+    "#39d353",
+    "#58a6ff",
+    "#ffa657",
+    "#f78166",
+    "#d2a8ff",
+    "#79c0ff",
+    "#e3b341",
+    "#ff7b72",
 ]
 
 # ── Location definitions ───────────────────────────────────────────────────────
@@ -55,7 +62,7 @@ LOCATIONS: list[dict[str, Any]] = [
         "group": None,
         "site_id": "300048586",
         "collectors": [
-            {"source_id": "eco_300048586_in",  "label": "↗ Centrum → Doubravka", "color": "#39d353"},
+            {"source_id": "eco_300048586_in", "label": "↗ Centrum → Doubravka", "color": "#39d353"},
             {"source_id": "eco_300048586_out", "label": "↙ Doubravka → Centrum", "color": "#1a6629"},
         ],
     },
@@ -69,11 +76,10 @@ LOCATIONS: list[dict[str, Any]] = [
         "group": None,
         "site_id": "300048587",
         "collectors": [
-            {"source_id": "eco_300048587_in",  "label": "↗ Centrum → Bolevec", "color": "#58a6ff"},
+            {"source_id": "eco_300048587_in", "label": "↗ Centrum → Bolevec", "color": "#58a6ff"},
             {"source_id": "eco_300048587_out", "label": "↙ Bolevec → Centrum", "color": "#1a4d8f"},
         ],
     },
-
     # ── Cameras ───────────────────────────────────────────────────────────────
     {
         "id": "cam_bhora",
@@ -84,7 +90,7 @@ LOCATIONS: list[dict[str, Any]] = [
         "group": None,
         "cam_id": "29",
         "collectors": [
-            {"collector_id": "8", "source_id": "cam_29_c8", "label": "→ Bílá Hora – Zruč",  "color": "#f78166"},
+            {"collector_id": "8", "source_id": "cam_29_c8", "label": "→ Bílá Hora – Zruč", "color": "#f78166"},
             {"collector_id": "9", "source_id": "cam_29_c9", "label": "← Zruč – Bílá Hora", "color": "#ffa657"},
         ],
     },
@@ -97,7 +103,7 @@ LOCATIONS: list[dict[str, Any]] = [
         "group": None,
         "cam_id": "1",
         "collectors": [
-            {"collector_id": "23", "source_id": "cam_1_c23", "label": "→ Centrum",  "color": "#d2a8ff"},
+            {"collector_id": "23", "source_id": "cam_1_c23", "label": "→ Centrum", "color": "#d2a8ff"},
             {"collector_id": "26", "source_id": "cam_1_c26", "label": "→ OC Plaza", "color": "#8b5cf6"},
         ],
     },
@@ -123,10 +129,10 @@ LOCATIONS: list[dict[str, Any]] = [
         "group": "skvrn",
         "cam_id": "19",
         "collectors": [
-            {"collector_id": "7",  "source_id": "cam_19_c7",  "label": "Cyklostezka Skvrňany",   "color": "#79c0ff"},
-            {"collector_id": "8",  "source_id": "cam_19_c8",  "label": "Přechod Vejprnice",       "color": "#58a6ff"},
-            {"collector_id": "9",  "source_id": "cam_19_c9",  "label": "Přechod Skvrňany",        "color": "#1f6feb"},
-            {"collector_id": "11", "source_id": "cam_19_c11", "label": "Cyklostezka Vejprnice",   "color": "#388bfd"},
+            {"collector_id": "7", "source_id": "cam_19_c7", "label": "Cyklostezka Skvrňany", "color": "#79c0ff"},
+            {"collector_id": "8", "source_id": "cam_19_c8", "label": "Přechod Vejprnice", "color": "#58a6ff"},
+            {"collector_id": "9", "source_id": "cam_19_c9", "label": "Přechod Skvrňany", "color": "#1f6feb"},
+            {"collector_id": "11", "source_id": "cam_19_c11", "label": "Cyklostezka Vejprnice", "color": "#388bfd"},
         ],
     },
     {
@@ -138,10 +144,10 @@ LOCATIONS: list[dict[str, Any]] = [
         "group": None,
         "cam_id": "5",
         "collectors": [
-            {"collector_id": "5", "source_id": "cam_5_c5", "label": "U Prazdroje → Centrum",    "color": "#7ee787"},
+            {"collector_id": "5", "source_id": "cam_5_c5", "label": "U Prazdroje → Centrum", "color": "#7ee787"},
             {"collector_id": "6", "source_id": "cam_5_c6", "label": "U Prazdroje → Rokycanská", "color": "#56d364"},
-            {"collector_id": "7", "source_id": "cam_5_c7", "label": "Lobezká → U Prazdroje",    "color": "#2ea043"},
-            {"collector_id": "8", "source_id": "cam_5_c8", "label": "U Prazdroje → Lobezká",    "color": "#39d353"},
+            {"collector_id": "7", "source_id": "cam_5_c7", "label": "Lobezká → U Prazdroje", "color": "#2ea043"},
+            {"collector_id": "8", "source_id": "cam_5_c8", "label": "U Prazdroje → Lobezká", "color": "#39d353"},
         ],
     },
     {
@@ -153,7 +159,7 @@ LOCATIONS: list[dict[str, Any]] = [
         "group": "papirna",
         "cam_id": "3",
         "collectors": [
-            {"collector_id": "5", "source_id": "cam_3_c5", "label": "→ Centrum",   "color": "#e3b341"},
+            {"collector_id": "5", "source_id": "cam_3_c5", "label": "→ Centrum", "color": "#e3b341"},
             {"collector_id": "6", "source_id": "cam_3_c6", "label": "→ Doudlevce", "color": "#d29922"},
         ],
     },
@@ -166,12 +172,12 @@ LOCATIONS: list[dict[str, Any]] = [
         "group": "papirna",
         "cam_id": "23",
         "collectors": [
-            {"collector_id": "6",  "source_id": "cam_23_c6",  "label": "Centrum → Slovany",  "color": "#f0883e"},
-            {"collector_id": "7",  "source_id": "cam_23_c7",  "label": "Centrum → Lávka",    "color": "#e67e22"},
-            {"collector_id": "9",  "source_id": "cam_23_c9",  "label": "Slovany → Centrum",  "color": "#d35400"},
-            {"collector_id": "10", "source_id": "cam_23_c10", "label": "Lávka → Centrum",    "color": "#ffa657"},
-            {"collector_id": "11", "source_id": "cam_23_c11", "label": "Lávka → Slovany",    "color": "#ff8c00"},
-            {"collector_id": "12", "source_id": "cam_23_c12", "label": "Slovany → Lávka",    "color": "#ff6b35"},
+            {"collector_id": "6", "source_id": "cam_23_c6", "label": "Centrum → Slovany", "color": "#f0883e"},
+            {"collector_id": "7", "source_id": "cam_23_c7", "label": "Centrum → Lávka", "color": "#e67e22"},
+            {"collector_id": "9", "source_id": "cam_23_c9", "label": "Slovany → Centrum", "color": "#d35400"},
+            {"collector_id": "10", "source_id": "cam_23_c10", "label": "Lávka → Centrum", "color": "#ffa657"},
+            {"collector_id": "11", "source_id": "cam_23_c11", "label": "Lávka → Slovany", "color": "#ff8c00"},
+            {"collector_id": "12", "source_id": "cam_23_c12", "label": "Slovany → Lávka", "color": "#ff6b35"},
         ],
     },
     {
@@ -196,7 +202,7 @@ LOCATIONS: list[dict[str, Any]] = [
         "group": None,
         "cam_id": "9",
         "collectors": [
-            {"collector_id": "5", "source_id": "cam_9_c5", "label": "→ Centrum",  "color": "#ff7b72"},
+            {"collector_id": "5", "source_id": "cam_9_c5", "label": "→ Centrum", "color": "#ff7b72"},
             {"collector_id": "6", "source_id": "cam_9_c6", "label": "→ Lochotín", "color": "#da3633"},
         ],
     },
@@ -208,18 +214,18 @@ LOCATIONS: list[dict[str, Any]] = [
         "color": "#56d364",
         "group": None,
         "cam_id": "11",
-        "collectors": [],   # collector map not yet known; filled after first ingest
+        "collectors": [],  # collector map not yet known; filled after first ingest
     },
 ]
 
 # ── Groups (for nav grouping) ─────────────────────────────────────────────────
 GROUPS = {
     "papirna": {"label": "Papírna", "icon": "🏭"},
-    "skvrn":   {"label": "Skvrňany / Vejprnice", "icon": "🌿"},
+    "skvrn": {"label": "Skvrňany / Vejprnice", "icon": "🌿"},
 }
 
 # ── Fast lookup helpers ────────────────────────────────────────────────────────
-LOCATION_BY_ID   = {loc["id"]: loc for loc in LOCATIONS}
+LOCATION_BY_ID = {loc["id"]: loc for loc in LOCATIONS}
 
 # source_id → (location_id, collector dict)
 SOURCE_MAP: dict[str, tuple[str, dict[str, Any]]] = {}

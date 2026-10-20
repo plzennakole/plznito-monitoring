@@ -12,6 +12,10 @@ line-length = 120
 target-version = "py313"
 extend-exclude = ["notebooks"]
 
+[tool.ruff.format]
+# House style: double quotes for human-readable text, single quotes for programmatic strings.
+quote-style = "preserve"
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
 

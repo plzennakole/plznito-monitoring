@@ -23,7 +23,7 @@ _MAX_RESULT_ROWS = env_int('BIKECOUNTERS_MAX_RESULT_ROWS', 50_000)
 # SQL expression truncating ``ts`` to the bucket of each resolution.
 _RESOLUTION_TRUNC = {
     'hourly': 'substr(ts, 1, 13)',  # 'YYYY-MM-DD HH'
-    'daily': 'substr(ts, 1, 10)',   # 'YYYY-MM-DD'
+    'daily': 'substr(ts, 1, 10)',  # 'YYYY-MM-DD'
 }
 
 bp = Blueprint('bikecounters', __name__, url_prefix='/bikecounters')
@@ -83,47 +83,55 @@ def api_nav() -> Response:
     for loc in sections.get('camera', []):
         gid = loc.get('group')
         if not gid:
-            cam_items.append({
-                'type': 'item',
-                'id': loc['id'],
-                'name': loc['name'],
-                'icon': loc.get('icon', ''),
-                'color': loc['color'],
-            })
+            cam_items.append(
+                {
+                    'type': 'item',
+                    'id': loc['id'],
+                    'name': loc['name'],
+                    'icon': loc.get('icon', ''),
+                    'color': loc['color'],
+                }
+            )
             continue
         if gid in seen_groups:
             continue
         seen_groups.add(gid)
         group_info = bw_cfg.GROUPS.get(gid, {'label': gid})
-        cam_items.append({
-            'type': 'group',
-            'id': gid,
-            'name': group_info['label'],
-            'icon': group_info.get('icon', ''),
-            'children': [
-                {'id': location['id'], 'name': location['name'], 'color': location['color']}
-                for location in bw_cfg.LOCATIONS
-                if location.get('group') == gid
-            ],
-        })
+        cam_items.append(
+            {
+                'type': 'group',
+                'id': gid,
+                'name': group_info['label'],
+                'icon': group_info.get('icon', ''),
+                'children': [
+                    {'id': location['id'], 'name': location['name'], 'color': location['color']}
+                    for location in bw_cfg.LOCATIONS
+                    if location.get('group') == gid
+                ],
+            }
+        )
 
-    return jsonify([
-        {'label': "ECO-COUNTER", 'items': eco_items},
-        {'label': "KAMERY", 'items': cam_items},
-    ])
+    return jsonify(
+        [
+            {'label': "ECO-COUNTER", 'items': eco_items},
+            {'label': "KAMERY", 'items': cam_items},
+        ]
+    )
 
 
 @bp.route('/api/location/<loc_id>')
 def api_location(loc_id: str) -> Response:
     """Location metadata including collectors."""
     loc = _get_location(loc_id)
-    return jsonify({
-        'id': loc['id'],
-        'name': loc['name'],
-        'color': loc['color'],
-        'type': loc['type'],
-        'collectors': loc['collectors'],
-    })
+    return jsonify(
+        {
+            'id': loc['id'],
+            'name': loc['name'],
+            'color': loc['color'],
+            'type': loc['type'],
+            'collectors': loc['collectors'],
+        }
+    )
 
 
 def _validate_date_range(from_date: str | None, to_date: str | None) -> None:
@@ -213,8 +221,9 @@ def _counts_payload(loc_id: str, resolution: str, from_date: str | None, to_date
 
     truncated = len(combined_rows) >= _MAX_RESULT_ROWS or len(per_col_rows) >= _MAX_RESULT_ROWS
     if truncated:
-        logger.warning("api_counts %s/%s hit the %d row limit; result is truncated.",
-                       loc_id, resolution, _MAX_RESULT_ROWS)
+        logger.warning(
+            "api_counts %s/%s hit the %d row limit; result is truncated.", loc_id, resolution, _MAX_RESULT_ROWS
+        )
 
     per_col_grouped: dict[str, list[dict[str, Any]]] = {}
     for row in per_col_rows:
@@ -246,9 +255,14 @@ def api_counts(loc_id: str) -> Response:
 
     The ``ts`` field is ``YYYY-MM-DD HH`` (hourly) or ``YYYY-MM-DD`` (daily).
     """
-    return jsonify(_counts_payload(
-        loc_id, request.args.get('resolution', 'daily'), request.args.get('from'), request.args.get('to'),
-    ))
+    return jsonify(
+        _counts_payload(
+            loc_id,
+            request.args.get('resolution', 'daily'),
+            request.args.get('from'),
+            request.args.get('to'),
+        )
+    )
 
 
 @bp.route('/api/daily/<loc_id>')
@@ -328,14 +342,16 @@ def api_yoy_all() -> Response:
         if not loc['collectors']:
             continue
         stats = _location_yoy(loc, ref_date)
-        result.append({
-            'id': loc['id'],
-            'name': loc['name'],
-            'type': loc['type'],
-            'color': loc['color'],
-            'ytd': stats['ytd'],
-            'mtd': stats['mtd'],
-        })
+        result.append(
+            {
+                'id': loc['id'],
+                'name': loc['name'],
+                'type': loc['type'],
+                'color': loc['color'],
+                'ytd': stats['ytd'],
+                'mtd': stats['mtd'],
+            }
+        )
     return jsonify({'ref_date': ref_date.isoformat(), 'locations': result})
 
 
@@ -350,7 +366,8 @@ def api_debug(loc_id: str) -> Response:
         return jsonify({'location': loc_id, 'sources': [], 'latest_rows': []})
     placeholders = ','.join('?' * len(source_ids))
 
-    stats = query(f"""
+    stats = query(
+        f"""
         SELECT source_id,
                COUNT(*)        AS intervals,
                MIN(ts)         AS first_ts,
@@ -361,13 +378,18 @@ def api_debug(loc_id: str) -> Response:
         FROM counts
         WHERE source_id IN ({placeholders})
         GROUP BY source_id
-    """, source_ids)
+    """,
+        source_ids,
+    )
 
-    sample = query(f"""
+    sample = query(
+        f"""
         SELECT source_id, ts, bikes, scooters
         FROM counts
         WHERE source_id IN ({placeholders})
         ORDER BY ts DESC LIMIT 10
-    """, source_ids)
+    """,
+        source_ids,
+    )
 
     return jsonify({'location': loc_id, 'sources': stats, 'latest_rows': sample})

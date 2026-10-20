@@ -91,7 +91,8 @@ def filter_issues(
     :return: Matching issues.
     """
     return [
-        issue for issue in issues
+        issue
+        for issue in issues
         if (since is None or issue['created'].date() >= since)
         and (until is None or issue['created'].date() <= until)
         and (status_id is None or issue['status_id'] == status_id)
@@ -148,8 +149,7 @@ class IssueStore:
             self._issues = issues
             self._by_id = {issue['id']: issue for issue in issues}
             self._mtime = mtime
-            logger.info("Loaded %d Plznito issues from %s (skipped %d)",
-                        len(issues), self.path, skipped['invalid'])
+            logger.info("Loaded %d Plznito issues from %s (skipped %d)", len(issues), self.path, skipped['invalid'])
         return mtime
 
     def get_issues(self) -> list[dict[str, Any]]:

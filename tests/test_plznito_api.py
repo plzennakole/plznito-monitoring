@@ -28,17 +28,20 @@ def _ids(response) -> list[int]:
     return [item['id'] for item in response.get_json()['items']]
 
 
-@pytest.mark.parametrize('query, expected_ids, expected_total', [
-    ('', [5, 3, 2, 1], 4),
-    ('?cyklo=true', [3, 2], 2),
-    ('?since=2026-03-15', [5, 3], 2),
-    ('?since=2026-01-01&until=2026-03-14&status_id=2', [2], 1),
-    ('?category_id=4', [5, 2, 1], 3),
-    ('?since_id=2', [5, 3], 2),
-    ('?limit=2', [5, 3], 4),
-    ('?limit=2&offset=3', [1], 4),
-    ('?offset=10', [], 4),
-])
+@pytest.mark.parametrize(
+    'query, expected_ids, expected_total',
+    [
+        ('', [5, 3, 2, 1], 4),
+        ('?cyklo=true', [3, 2], 2),
+        ('?since=2026-03-15', [5, 3], 2),
+        ('?since=2026-01-01&until=2026-03-14&status_id=2', [2], 1),
+        ('?category_id=4', [5, 2, 1], 3),
+        ('?since_id=2', [5, 3], 2),
+        ('?limit=2', [5, 3], 4),
+        ('?limit=2&offset=3', [1], 4),
+        ('?offset=10', [], 4),
+    ],
+)
 def test_list_issues(client: FlaskClient, query: str, expected_ids: list[int], expected_total: int) -> None:
     response = client.get(f'/plznito/api/issues{query}')
     assert response.status_code == 200
@@ -51,25 +54,48 @@ def test_list_issues_item_shape(client: FlaskClient) -> None:
     assert item['id'] == 5
     assert item['created'] == '2026-03-15T10:00:00+01:00'
     assert set(item) == {
-        'id', 'name', 'description', 'solution', 'status_id', 'status_label', 'category_id',
-        'category_label', 'created', 'latitude', 'longitude', 'address', 'photo_url', 'is_cyklo',
+        'id',
+        'name',
+        'description',
+        'solution',
+        'status_id',
+        'status_label',
+        'category_id',
+        'category_label',
+        'created',
+        'latitude',
+        'longitude',
+        'address',
+        'photo_url',
+        'is_cyklo',
         'ticket_url',
     }
 
 
-@pytest.mark.parametrize('query', [
-    '?limit=0', '?limit=1001', '?offset=-1', '?since=15.03.2026', '?cyklo=maybe', '?status_id=x',
-])
+@pytest.mark.parametrize(
+    'query',
+    [
+        '?limit=0',
+        '?limit=1001',
+        '?offset=-1',
+        '?since=15.03.2026',
+        '?cyklo=maybe',
+        '?status_id=x',
+    ],
+)
 def test_list_issues_invalid_params(client: FlaskClient, query: str) -> None:
     assert client.get(f'/plznito/api/issues{query}').status_code == 422
 
 
-@pytest.mark.parametrize('today, query, expected_ids', [
-    (datetime.date(2026, 3, 15), '', [5, 3, 2]),
-    (datetime.date(2026, 3, 15), '?days=0', [5, 3]),
-    (datetime.date(2026, 3, 16), '?days=1&cyklo=true', [3]),
-    (datetime.date(2027, 1, 1), '', []),
-])
+@pytest.mark.parametrize(
+    'today, query, expected_ids',
+    [
+        (datetime.date(2026, 3, 15), '', [5, 3, 2]),
+        (datetime.date(2026, 3, 15), '?days=0', [5, 3]),
+        (datetime.date(2026, 3, 16), '?days=1&cyklo=true', [3]),
+        (datetime.date(2027, 1, 1), '', []),
+    ],
+)
 def test_list_new_issues(client: FlaskClient, today: datetime.date, query: str, expected_ids: list[int]) -> None:
     with patch.object(plznito_api, '_today', return_value=today):
         response = client.get(f'/plznito/api/issues/new{query}')
@@ -136,7 +162,9 @@ def test_docs_available(client: FlaskClient, path: str) -> None:
 def test_openapi_lists_endpoints(client: FlaskClient) -> None:
     paths = client.get('/plznito/api/openapi.json').get_json()['paths']
     assert set(paths) == {
-        '/plznito/api/issues', '/plznito/api/issues/new', '/plznito/api/issues/{issue_id}',
+        '/plznito/api/issues',
+        '/plznito/api/issues/new',
+        '/plznito/api/issues/{issue_id}',
         '/plznito/api/meta',
     }
 

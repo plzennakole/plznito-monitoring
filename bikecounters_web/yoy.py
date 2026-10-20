@@ -5,6 +5,7 @@ Days with a zero total are treated as missing (camera/counter outage), so
 comparisons are made on average per day (monthly) or on matched days only
 (periods), never on raw sums over uneven coverage.
 """
+
 from datetime import date, timedelta
 
 MIN_MONTH_DAYS = 15

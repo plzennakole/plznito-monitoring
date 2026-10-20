@@ -21,15 +21,17 @@ def _render_map_page(page_template: str, map_name: str, render_args: str) -> str
     try:
         return render_template(page_template)
     except TemplateNotFound:
-        return render_template('map_missing.html', map_name=map_name,
-                               generate_command=f'{_RENDER_COMMAND} {render_args}'), 503
+        return render_template(
+            'map_missing.html', map_name=map_name, generate_command=f'{_RENDER_COMMAND} {render_args}'
+        ), 503
 
 
 @bp.route('/plznito/map-bike')
 def map_bike() -> str | tuple[str, int]:
     """Plzeň cycling ticket map."""
     return _render_map_page(
-        'plznito_index.html', 'plznito_map.html',
+        'plznito_index.html',
+        'plznito_map.html',
         '--file_in plznito_monitoring/plznito_cyklo.json --file_out plznito_monitoring/templates/plznito_map.html',
     )
 
@@ -38,7 +40,8 @@ def map_bike() -> str | tuple[str, int]:
 def map_all() -> str | tuple[str, int]:
     """Plzeň all-tickets map."""
     return _render_map_page(
-        'plznito_full_map_index.html', 'plznito_map_all.html',
+        'plznito_full_map_index.html',
+        'plznito_map_all.html',
         '--cluster_style --popup_mode full --file_in plznito_monitoring/plznito_all.json'
         ' --file_out plznito_monitoring/templates/plznito_map_all.html',
     )

@@ -10,9 +10,7 @@ from app.extensions import cache
 from app.settings import env_int
 from app.train_delays import scrape_babitron_delays
 
-TRAIN_DELAYS_SOURCE_R_URL = (
-    os.getenv('TRAIN_DELAYS_SOURCE_R_URL') or 'https://babitron.kam.mff.cuni.cz/zponline.html'
-)
+TRAIN_DELAYS_SOURCE_R_URL = os.getenv('TRAIN_DELAYS_SOURCE_R_URL') or 'https://babitron.kam.mff.cuni.cz/zponline.html'
 TRAIN_DELAYS_SOURCE_OS_URL = (
     os.getenv('TRAIN_DELAYS_SOURCE_OS_URL') or 'https://babitron.kam.mff.cuni.cz/zponlineos.html'
 )

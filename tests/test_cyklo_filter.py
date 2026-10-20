@@ -34,16 +34,19 @@ class CykloFilterTests(unittest.TestCase):
         self.assertFalse(cyklo_filter.is_cyklo_record("auto", "chodnik"))
 
 
-@pytest.mark.parametrize("item, expected", [
-    ({"report": "Cyklostezka rozbita", "name": "A"}, True),
-    ({"report": None, "name": "Kolobezka trasa"}, True),
-    ({"report": "recyklace u stezky", "name": "CYKLO trasa"}, False),
-    ({"report": "bez souvislosti", "name": "CYKLO trasa"}, True),
-    ({"report": "bez souvislosti", "name": "Díra"}, False),
-    ({"report": None, "name": None}, False),
-    ({}, False),
-    ("bad-item", False),
-])
+@pytest.mark.parametrize(
+    "item, expected",
+    [
+        ({"report": "Cyklostezka rozbita", "name": "A"}, True),
+        ({"report": None, "name": "Kolobezka trasa"}, True),
+        ({"report": "recyklace u stezky", "name": "CYKLO trasa"}, False),
+        ({"report": "bez souvislosti", "name": "CYKLO trasa"}, True),
+        ({"report": "bez souvislosti", "name": "Díra"}, False),
+        ({"report": None, "name": None}, False),
+        ({}, False),
+        ("bad-item", False),
+    ],
+)
 def test_is_cyklo_item(item, expected):
     assert cyklo_filter.is_cyklo_item(item) is expected
 

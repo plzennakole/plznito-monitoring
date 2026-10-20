@@ -54,67 +54,82 @@ def _mock_response(text: str, status_code: int = 200) -> _MockResponse:
 
 # ── parsing helpers ───────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize('delay_text, expected_status, expected_minutes', [
-    ("bez zpoždění", 'on_time', 0),
-    ("včas", 'on_time', 0),
-    ("<b>12 min. zpoždění</b>", 'delayed', 12),
-    ("+5", 'delayed', 5),
-    ("vlak zrušen", 'canceled', None),
-    ("odklon", 'diverted', None),
-    ("výluka", 'disruption', None),
-    ("", 'unknown', None),
-    ("neznámý stav", 'unknown', None),
-])
-def test_parse_delay_status_and_minutes(delay_text: str, expected_status: str,
-                                        expected_minutes: int | None) -> None:
+
+@pytest.mark.parametrize(
+    'delay_text, expected_status, expected_minutes',
+    [
+        ("bez zpoždění", 'on_time', 0),
+        ("včas", 'on_time', 0),
+        ("<b>12 min. zpoždění</b>", 'delayed', 12),
+        ("+5", 'delayed', 5),
+        ("vlak zrušen", 'canceled', None),
+        ("odklon", 'diverted', None),
+        ("výluka", 'disruption', None),
+        ("", 'unknown', None),
+        ("neznámý stav", 'unknown', None),
+    ],
+)
+def test_parse_delay_status_and_minutes(delay_text: str, expected_status: str, expected_minutes: int | None) -> None:
     status, minutes = train_delays.parse_delay_status_and_minutes(delay_text)
     assert status == expected_status
     assert minutes == expected_minutes
 
 
-@pytest.mark.parametrize('delay_text, expected', [
-    ("", None),
-    ("bez zpoždění", 0),
-    ("včas", 0),
-    ("7 min. zpoždění", 7),
-    ("zrušen", None),
-    ("odklon", None),
-    ("výluka", None),
-    ("1234 min.", None),
-])
+@pytest.mark.parametrize(
+    'delay_text, expected',
+    [
+        ("", None),
+        ("bez zpoždění", 0),
+        ("včas", 0),
+        ("7 min. zpoždění", 7),
+        ("zrušen", None),
+        ("odklon", None),
+        ("výluka", None),
+        ("1234 min.", None),
+    ],
+)
 def test_get_delay(delay_text: str, expected: int | None) -> None:
     assert train_delays.get_delay(delay_text) == expected
 
 
-@pytest.mark.parametrize('train_text, expected', [
-    ("rj 55", ('rj', 55)),
-    ("EC103", ('EC', 103)),
-    ("Bus EC 123", ('EC', 123)),
-    ("Sp 1408", ('Sp', 1408)),
-    ("vlak", (None, None)),
-    ("", (None, None)),
-])
+@pytest.mark.parametrize(
+    'train_text, expected',
+    [
+        ("rj 55", ('rj', 55)),
+        ("EC103", ('EC', 103)),
+        ("Bus EC 123", ('EC', 123)),
+        ("Sp 1408", ('Sp', 1408)),
+        ("vlak", (None, None)),
+        ("", (None, None)),
+    ],
+)
 def test_parse_train_identity(train_text: str, expected: tuple) -> None:
     assert train_delays.parse_train_identity(train_text) == expected
 
 
-@pytest.mark.parametrize('text, expected', [
-    ("11:04/11:15 (odj.)", ('11:04', '11:15')),
-    ("9:58 (příj.)", ('9:58', None)),
-    ("bez času", (None, None)),
-])
+@pytest.mark.parametrize(
+    'text, expected',
+    [
+        ("11:04/11:15 (odj.)", ('11:04', '11:15')),
+        ("9:58 (příj.)", ('9:58', None)),
+        ("bez času", (None, None)),
+    ],
+)
 def test_parse_scheduled_actual_times(text: str, expected: tuple) -> None:
     assert train_delays.parse_scheduled_actual_times(text) == expected
 
 
-@pytest.mark.parametrize('url, expected', [
-    ('https://babitron.kam.mff.cuni.cz/zponline.html', 'zponline'),
-    ('https://babitron.kam.mff.cuni.cz/zponlineos.html', 'zponlineos'),
-    ('https://babitron.kam.mff.cuni.cz/ZPONLINEOS.HTML', 'zponlineos'),
-    ('https://kam.mff.cuni.cz/~babilon/zponlineos', 'zponlineos'),
-    ('https://kam.mff.cuni.cz/~babilon/zponlineos/', 'zponlineos'),
-    ('https://kam.mff.cuni.cz/~babilon/zponline', 'zponline'),
-])
+@pytest.mark.parametrize(
+    'url, expected',
+    [
+        ('https://babitron.kam.mff.cuni.cz/zponline.html', 'zponline'),
+        ('https://babitron.kam.mff.cuni.cz/zponlineos.html', 'zponlineos'),
+        ('https://babitron.kam.mff.cuni.cz/ZPONLINEOS.HTML', 'zponlineos'),
+        ('https://kam.mff.cuni.cz/~babilon/zponlineos', 'zponlineos'),
+        ('https://kam.mff.cuni.cz/~babilon/zponlineos/', 'zponlineos'),
+        ('https://kam.mff.cuni.cz/~babilon/zponline', 'zponline'),
+    ],
+)
 def test_source_page_from_url(url: str, expected: str) -> None:
     assert train_delays.source_page_from_url(url) == expected
 
@@ -124,6 +139,7 @@ def test_normalize_text_strips_diacritics_and_lowercases() -> None:
 
 
 # ── scrape_babitron_delays ────────────────────────────────────────────────────
+
 
 @patch('app.train_delays.requests.get')
 def test_scrape_parses_rows_from_unclosed_cells(mock_get: MagicMock) -> None:
@@ -171,6 +187,7 @@ def test_scrape_raises_on_http_error(mock_get: MagicMock) -> None:
 
 
 # ── /train_delays/ endpoint ───────────────────────────────────────────────────
+
 
 @patch('app.train_delays_api.scrape_babitron_delays')
 def test_endpoint_merges_both_sources(mock_scrape: MagicMock, client) -> None:

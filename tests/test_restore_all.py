@@ -68,15 +68,21 @@ def test_location_to_item_without_coordinates() -> None:
     assert (item['latitude'], item['longitude']) == ('', '')
 
 
-@pytest.mark.parametrize('ticket_id, response, expected_id', [
-    (100, _response(MAP_PAGE), 100),
-    (101, _response(MAP_PAGE), 101),
-    (999, _response(MAP_PAGE), None),
-    (100, _response(status=500), None),
-    (100, _response("var locations = [{id: }];"), None),
-])
+@pytest.mark.parametrize(
+    'ticket_id, response, expected_id',
+    [
+        (100, _response(MAP_PAGE), 100),
+        (101, _response(MAP_PAGE), 101),
+        (999, _response(MAP_PAGE), None),
+        (100, _response(status=500), None),
+        (100, _response("var locations = [{id: }];"), None),
+    ],
+)
 def test_scrape_one_id_from_map(
-    mocker: MockerFixture, ticket_id: int, response: MagicMock, expected_id: int | None,
+    mocker: MockerFixture,
+    ticket_id: int,
+    response: MagicMock,
+    expected_id: int | None,
 ) -> None:
     mock_get = mocker.patch.object(restore_all.requests, 'get', return_value=response)
 
@@ -91,16 +97,23 @@ def test_scrape_one_id_from_map_network_error(mocker: MockerFixture) -> None:
     assert restore_all.scrape_one_id_from_map(100) == {}
 
 
-@pytest.mark.parametrize('source, api_response, expected, expect_scrape', [
-    ('auto', _response(json_data={'item': {'id': 1}}), {'item': {'id': 1}}, False),
-    ('auto', _response(json_data={}), {'item': {'id': 9}}, True),
-    ('auto', _response(status=404), {'item': {'id': 9}}, True),
-    ('api', _response(status=404), {}, False),
-    ('api', _response(json_data={}), {}, False),
-    ('web', None, {'item': {'id': 9}}, True),
-])
+@pytest.mark.parametrize(
+    'source, api_response, expected, expect_scrape',
+    [
+        ('auto', _response(json_data={'item': {'id': 1}}), {'item': {'id': 1}}, False),
+        ('auto', _response(json_data={}), {'item': {'id': 9}}, True),
+        ('auto', _response(status=404), {'item': {'id': 9}}, True),
+        ('api', _response(status=404), {}, False),
+        ('api', _response(json_data={}), {}, False),
+        ('web', None, {'item': {'id': 9}}, True),
+    ],
+)
 def test_download_one_id_sources(
-    mocker: MockerFixture, source: str, api_response: MagicMock | None, expected: dict, expect_scrape: bool,
+    mocker: MockerFixture,
+    source: str,
+    api_response: MagicMock | None,
+    expected: dict,
+    expect_scrape: bool,
 ) -> None:
     mock_get = mocker.patch.object(restore_all.requests, 'get', return_value=api_response)
     mock_scrape = mocker.patch.object(restore_all, 'scrape_one_id_from_map', return_value={'item': {'id': 9}})

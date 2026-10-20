@@ -7,19 +7,22 @@ import pytest
 from plznito_monitoring import common
 
 
-@pytest.mark.parametrize('value, expected', [
-    (5, 5),
-    (0, 0),
-    ('42', 42),
-    (' 7 ', 7),
-    ('-1', None),
-    ('4.2', None),
-    ('abc', None),
-    ('', None),
-    (None, None),
-    (True, None),
-    (4.0, None),
-])
+@pytest.mark.parametrize(
+    'value, expected',
+    [
+        (5, 5),
+        (0, 0),
+        ('42', 42),
+        (' 7 ', 7),
+        ('-1', None),
+        ('4.2', None),
+        ('abc', None),
+        ('', None),
+        (None, None),
+        (True, None),
+        (4.0, None),
+    ],
+)
 def test_parse_int(value: object, expected: int | None) -> None:
     assert common.parse_int(value) == expected
 

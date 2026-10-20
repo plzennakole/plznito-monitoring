@@ -26,10 +26,12 @@ app.config.update(
     OPENAPI_SWAGGER_UI_URL="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/",
 )
 
-app.jinja_loader = ChoiceLoader([
-    FileSystemLoader(str(Path(__file__).parent / "templates")),
-    FileSystemLoader(str(Path(__file__).parent.parent / "plznito_monitoring" / "templates")),
-])
+app.jinja_loader = ChoiceLoader(
+    [
+        FileSystemLoader(str(Path(__file__).parent / "templates")),
+        FileSystemLoader(str(Path(__file__).parent.parent / "plznito_monitoring" / "templates")),
+    ]
+)
 cache.init_app(app)
 
 from app import bikecounters, maps, routes, train_delays_api
