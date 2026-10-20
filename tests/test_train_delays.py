@@ -220,3 +220,14 @@ def test_endpoint_options_preflight(mock_scrape: MagicMock, client) -> None:
 
     assert response.status_code in (200, 204)
     assert 'GET' in response.headers['Access-Control-Allow-Methods']
+
+
+@patch('app.routes.scrape_babitron_delays')
+def test_endpoint_options_preflight_is_not_cached_for_get(mock_scrape: MagicMock, client) -> None:
+    mock_scrape.return_value = {'Os 1': {'source_page': 'zponline'}}
+
+    client.options('/train_delays/')
+    response = client.get('/train_delays/')
+
+    assert response.status_code == 200
+    assert response.get_json() == {'Os 1': {'source_page': 'zponline'}}

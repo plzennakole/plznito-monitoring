@@ -7,7 +7,7 @@ Flask-based monitoring server for Plzeň cycling data: civic ticket tracking fro
 ```shell
 python run_flask.py
 # or with gunicorn
-gunicorn -w 2 -b 0.0.0.0:5000 app:application
+gunicorn -w 2 -b 0.0.0.0:5000 app:app
 ```
 
 Server configuration is in `config.json` (port, debug mode, WSGI backend: `flask` / `tornado` / `gevent`).
