@@ -11,7 +11,16 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from plznito_monitoring.common import PLZNITO_TZ, STATUS_LABELS, atomic_open, load_json, parse_int, status_label
+from plznito_monitoring.common import (
+    CATEGORY_IDS,
+    CATEGORY_LABELS,
+    PLZNITO_TZ,
+    STATUS_LABELS,
+    atomic_open,
+    load_json,
+    parse_int,
+    status_label,
+)
 
 logger = logging.getLogger(__name__)
 PLZNITO_DIR = Path(__file__).parent
@@ -29,6 +38,11 @@ DEFAULT_TIME_FILTER = "last_30_days"
 # "api": like compact, details are loaded from the Plznito API when a popup opens.
 POPUP_MODES = ("compact", "full", "api")
 DETAILS_API_PATH = "/plznito/api/issues/"
+# Scraped records only have the date of the last status change. Ids are assigned in creation
+# order and that date is never before creation, so the earliest date among a ticket and the
+# next CREATION_WINDOW ids bounds its creation date (validated on 42k API records: median
+# error 1 day, p99 4 days; a short window limits the damage of a mistyped date).
+CREATION_WINDOW = 50
 STATUS_COLOR_MAP = {
     2: "orange",
     3: "green",
@@ -58,9 +72,21 @@ def _parse_date_value(value: Any) -> datetime.datetime | None:
     return None
 
 
+def _parse_created(item: Record) -> datetime.datetime | None:
+    """
+    Real creation time of an API-shape record.
+
+    :param item: Raw record.
+    :return: ``created.date``, or ``None`` for scraped records.
+    """
+    created = item.get("created")
+    return _parse_date_value(created.get("date")) if isinstance(created, dict) else None
+
+
 def _parse_item_datetime(item: Record) -> tuple[datetime.datetime | None, str | None]:
     """
-    Creation time of a record: ``created.date`` (API shape), else ``date`` (scraped shape).
+    Best known date of a record: ``created.date`` (API shape), else ``date`` (scraped shape,
+    the date of the last status change).
 
     :param item: Raw record.
     :return: ``(datetime, original text)``, or ``(None, None)``.
@@ -76,6 +102,30 @@ def _parse_item_datetime(item: Record) -> tuple[datetime.datetime | None, str | 
         if parsed is not None:
             return parsed, str(raw_date).strip()
     return None, None
+
+
+def estimate_creation_dates(items: list[Any]) -> dict[int, datetime.datetime]:
+    """
+    Estimated creation time of every record without a real ``created`` date, see :data:`CREATION_WINDOW`.
+
+    :param items: All raw records (the estimate needs the newer neighbours of each record).
+    :return: Estimate by ticket id, only for records without ``created``.
+    """
+    dated = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        item_id = parse_int(item.get("id"))
+        date_obj, _ = _parse_item_datetime(item)
+        if item_id is not None and date_obj is not None:
+            dated.append((item_id, date_obj, _parse_created(item) is None))
+    dated.sort(key=lambda entry: entry[0])
+
+    estimates = {}
+    for index, (item_id, _, needs_estimate) in enumerate(dated):
+        if needs_estimate:
+            estimates[item_id] = min(date_obj for _, date_obj, _ in dated[index : index + CREATION_WINDOW + 1])
+    return estimates
 
 
 def _parse_coordinate(value: Any) -> float | None:
@@ -121,22 +171,24 @@ def _extract_optional_label(value: Any) -> str | None:
     return None
 
 
-def _resolve_category_filter(category_id: int | None, category_value: Any) -> tuple[str, str]:
+def _resolve_category(category_id: int | None, category_value: Any) -> tuple[int | None, str, str]:
     """
-    Filter key and label of a ticket category.
+    Category of a ticket; official names are mapped to their id so both record shapes match.
 
     :param category_id: Category id (API shape).
     :param category_value: Category name or object (scraped shape).
-    :return: ``(key, label)``, e.g. ``("id:4", "Kategorie 4")`` or ``("name:Zeleň", "Zeleň")``.
+    :return: ``(id, filter key, label)``, e.g. ``(4, "id:4", "Odpadky, černé skládky, úklidy")``;
+        unknown names give ``(None, "name:<name>", name)``.
     """
-    if category_id is not None:
-        return f"id:{category_id}", f"Kategorie {category_id}"
-
     category_name = _extract_optional_label(category_value)
-    if category_name is not None:
-        return f"name:{category_name}", category_name
+    if category_id is None and category_name is not None:
+        category_id = CATEGORY_IDS.get(category_name)
 
-    return "unknown", "Neznámá kategorie"
+    if category_id is not None:
+        return category_id, f"id:{category_id}", CATEGORY_LABELS.get(category_id, f"Kategorie {category_id}")
+    if category_name is not None:
+        return None, f"name:{category_name}", category_name
+    return None, "unknown", "Neznámá kategorie"
 
 
 def _to_unix_timestamp(value: datetime.datetime) -> int:
@@ -185,11 +237,15 @@ def _sanitize_photo_url(item: Record) -> str | None:
     return None
 
 
-def normalize_item(item: Any) -> tuple[Record | None, str | None]:
+def normalize_item(
+    item: Any, created_estimates: dict[int, datetime.datetime] | None = None
+) -> tuple[Record | None, str | None]:
     """
     Normalise a raw record (API or scraped shape) into the fields used by the map and the API.
 
     :param item: Raw record.
+    :param created_estimates: Output of :func:`estimate_creation_dates`; used for records
+        without a real creation date.
     :return: ``(normalized record, None)``, or ``(None, skip reason)`` for records without id,
         status, valid date or coordinates.
     """
@@ -207,14 +263,21 @@ def normalize_item(item: Any) -> tuple[Record | None, str | None]:
     date_time_obj, date_text = _parse_item_datetime(item)
     if date_time_obj is None:
         return None, "invalid_date"
+    item_key = parse_int(item_id)
+    estimate = created_estimates.get(item_key) if created_estimates and item_key is not None else None
+    created_is_estimate = estimate is not None
+    if estimate is not None:
+        date_time_obj = estimate
+        date_text = "≈ " + estimate.strftime("%d.%m.%Y")
 
     latitude = _parse_coordinate(item.get("latitude"))
     longitude = _parse_coordinate(item.get("longitude"))
     if latitude is None or longitude is None:
         return None, "invalid_coordinates"
 
-    category_id = parse_int(item.get("category_id"))
-    category_key, category_label = _resolve_category_filter(category_id, item.get("category"))
+    category_id, category_key, category_label = _resolve_category(
+        parse_int(item.get("category_id")), item.get("category")
+    )
 
     normalized = {
         "id": item_id,
@@ -224,6 +287,7 @@ def normalize_item(item: Any) -> tuple[Record | None, str | None]:
         "solution": item.get("solution"),
         "date_obj": date_time_obj,
         "date_text": date_text,
+        "created_is_estimate": created_is_estimate,
         "latitude": latitude,
         "longitude": longitude,
         "photo_url": _sanitize_photo_url(item),
@@ -340,10 +404,11 @@ def serialize_map_data(
     status_options_map = {}
     category_options_map = {}
 
+    created_estimates = estimate_creation_dates(data_current)
     for item in data_current:
         stats["input_records"] += 1
 
-        normalized_item, error_reason = normalize_item(item)
+        normalized_item, error_reason = normalize_item(item, created_estimates)
         if normalized_item is None:
             stats[f"skipped_{error_reason}"] += 1
             skipped.append({"id": _item_id_for_skip(item), "reason": error_reason})

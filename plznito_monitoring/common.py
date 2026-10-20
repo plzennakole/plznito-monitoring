@@ -23,6 +23,25 @@ STATUS_LABELS = {
 }
 
 
+# Official categories, from the category filter on plznito.cz. API records carry the id,
+# scraped records the name; both are mapped to the same category.
+CATEGORY_LABELS = {
+    1: "Dětská hřiště",
+    2: "Ostatní",
+    3: "Silnice, cyklostezky",
+    4: "Odpadky, černé skládky, úklidy",
+    5: "Chodník",
+    6: "Kanalizace",
+    7: "Dopravní značení",
+    8: "Lavičky",
+    9: "Veřejné osvětlení",
+    10: "Veřejná zeleň",
+    11: "Autovrak",
+    12: "Zastávky MHD",
+}
+CATEGORY_IDS = {label: category_id for category_id, label in CATEGORY_LABELS.items()}
+
+
 def status_label(status_id: int) -> str:
     """
     Human-readable label of a Plznito status.

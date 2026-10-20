@@ -98,6 +98,8 @@ plznito_monitoring/download_and_render.sh   # works from any directory; PYTHON=.
 
 The API reads `plznito_all.json` (override with `PLZNITO_DB_JSON`) into memory and reloads it when the file's mtime changes, i.e. after each cron run. Responses carry `Last-Modified` and `Cache-Control: public, max-age=300`; clients sending `If-Modified-Since` get `304` until new data is downloaded. For incremental sync, store the highest seen `id` and ask for `?since_id=<id>`.
 
+plznito.cz no longer publishes creation dates: scraped tickets only carry the date of their last status change. For those, `created` is estimated as the earliest date among the ticket and the next 50 ids (ids are assigned in creation order), marked `created_is_estimate: true`; on 42k tickets with known dates the estimate is within 1 day (median) and 4 days (p99). The maps use the same estimate for the time filters and show it as `≈ dd.mm.yyyy`.
+
 ---
 
 ### 2. Cycling counters (`bikecounters_web/`)

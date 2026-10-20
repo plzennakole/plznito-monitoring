@@ -63,6 +63,7 @@ def test_list_issues_item_shape(client: FlaskClient) -> None:
         'category_id',
         'category_label',
         'created',
+        'created_is_estimate',
         'latitude',
         'longitude',
         'address',
@@ -129,7 +130,7 @@ def test_meta(client: FlaskClient) -> None:
         {'id': 6, 'label': "Odpovězeno", 'count': 1},
         {'id': 2, 'label': "V řešení", 'count': 1},
     ]
-    assert body['categories'][0] == {'id': 4, 'label': "Kategorie 4", 'count': 3}
+    assert body['categories'][0] == {'id': 4, 'label': "Odpadky, černé skládky, úklidy", 'count': 3}
 
 
 def test_cache_headers_and_conditional_request(client: FlaskClient) -> None:

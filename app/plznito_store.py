@@ -12,7 +12,7 @@ from typing import Any
 
 from plznito_monitoring.common import PLZNITO_TZ, parse_int, status_label
 from plznito_monitoring.cyklo_filter import is_cyklo_item
-from plznito_monitoring.run_map_render import normalize_item
+from plznito_monitoring.run_map_render import estimate_creation_dates, normalize_item
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +34,18 @@ def db_path_from_env() -> pathlib.Path:
     return pathlib.Path(value) if value else DEFAULT_DB_PATH
 
 
-def to_api_issue(item: dict[str, Any]) -> dict[str, Any] | None:
+def to_api_issue(
+    item: dict[str, Any], created_estimates: dict[int, datetime.datetime] | None = None
+) -> dict[str, Any] | None:
     """
     Convert a raw Plznito record (API or web-scrape shape) into the public API shape.
 
     :param item: Raw record as stored in the JSON DB.
+    :param created_estimates: Creation date estimates for scraped records, see
+        :func:`plznito_monitoring.run_map_render.estimate_creation_dates`.
     :return: API issue dict, or ``None`` if the record lacks id, status, date or coordinates.
     """
-    normalized, _skip_reason = normalize_item(item)
+    normalized, _skip_reason = normalize_item(item, created_estimates)
     if normalized is None:
         return None
     issue_id = parse_int(normalized['id'])
@@ -60,6 +64,7 @@ def to_api_issue(item: dict[str, Any]) -> dict[str, Any] | None:
         'category_id': normalized['category_id'],
         'category_label': normalized['category_label'],
         'created': normalized['date_obj'].replace(tzinfo=PLZNITO_TZ),
+        'created_is_estimate': normalized['created_is_estimate'],
         'latitude': normalized['latitude'],
         'longitude': normalized['longitude'],
         'address': (address.strip() or None) if isinstance(address, str) else None,
@@ -138,8 +143,9 @@ class IssueStore:
 
             issues = []
             skipped: Counter[str] = Counter()
+            created_estimates = estimate_creation_dates(raw_items)
             for item in raw_items:
-                issue = to_api_issue(item)
+                issue = to_api_issue(item, created_estimates)
                 if issue is None:
                     skipped['invalid'] += 1
                     continue
