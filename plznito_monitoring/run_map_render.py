@@ -19,6 +19,7 @@ from plznito_monitoring.common import (
     atomic_open,
     load_json,
     parse_int,
+    setup_logging,
     status_label,
 )
 
@@ -613,13 +614,13 @@ def main() -> None:
     parser.add_argument("--popup_mode", type=str, default="compact", choices=POPUP_MODES)
     args = parser.parse_args()
 
-    log_level = getattr(logging, args.log_level.upper(), logging.INFO)
-    logging.basicConfig(
-        filename=str(PLZNITO_DIR / "plznito_monitoring.log"), level=log_level, format='%(asctime)s %(message)s'
-    )
-    logger.setLevel(log_level)
-
-    render_map_to_file(args.file_in, args.file_out, cluster=args.cluster_style, popup_mode=args.popup_mode)
+    setup_logging(str(PLZNITO_DIR / "plznito_monitoring.log"), getattr(logging, args.log_level.upper(), logging.INFO))
+    try:
+        render_map_to_file(args.file_in, args.file_out, cluster=args.cluster_style, popup_mode=args.popup_mode)
+    except Exception:
+        # Top-level crash handler: the traceback goes to the log file and to stderr (cron/deploy log).
+        logger.exception("Rendering %s failed.", args.file_out)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

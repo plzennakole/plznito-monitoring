@@ -17,6 +17,8 @@ app.config.update(SECRET_KEY=os.urandom(24))
 app.logger.setLevel(logging.INFO)
 app.config.update(
     CACHE_TYPE='SimpleCache',
+    # The cron job re-renders the map templates; without this, workers serve the old map until restarted.
+    TEMPLATES_AUTO_RELOAD=True,
     API_TITLE="Plznito API",
     API_VERSION="1.0.0",
     OPENAPI_VERSION="3.0.3",

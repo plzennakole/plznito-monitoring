@@ -6,15 +6,17 @@ import bz2
 import json
 import logging
 import os
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from plznito_monitoring.common import atomic_write_json, load_json, parse_int
+from plznito_monitoring.common import atomic_write_json, load_json, parse_int, setup_logging
 from plznito_monitoring.cyklo_filter import filter_cyklo_items
 from plznito_monitoring.restore_all import download_one_id, scrape_map_page
+from plznito_monitoring.run_map_render import _parse_item_datetime
 
 logger = logging.getLogger(__name__)
 # Defaults live next to this file, so the scripts work from any working directory.
@@ -29,6 +31,11 @@ MAX_CONSECUTIVE_SCRAPE_FAILURES = 10
 # Ids are fetched in ordered chunks, so a crawl stop wastes at most one chunk of requests.
 SCRAPE_CHUNK_SIZE = 10
 SCRAPE_WORKERS = 5
+# After an outage the DB can be far behind; one run catches up at most this many ids.
+MAX_CRAWL_IDS = 20000
+# Warn when a run finds no new ticket and the newest one is older than this.
+STALE_AFTER_DAYS = 3
+PROGRESS_LOG_EVERY = 1000
 
 Record = dict[str, Any]
 
@@ -198,7 +205,9 @@ def _extract_item(scraper_output: Any) -> Record | None:
     return item
 
 
-def _scrape_in_chunks(start_id: int, end_id: int, known: dict[int, Record]) -> Iterator[tuple[int, Any]]:
+def _scrape_in_chunks(
+    start_id: int, end_id: int, known: dict[int, Record], counter: dict[str, int]
+) -> Iterator[tuple[int, Any]]:
     """
     Scrape ids ``start_id..end_id`` in parallel, yielding results in id order.
 
@@ -208,6 +217,7 @@ def _scrape_in_chunks(start_id: int, end_id: int, known: dict[int, Record]) -> I
     :param start_id: First ticket id.
     :param end_id: Last ticket id (inclusive).
     :param known: Already scraped records by id.
+    :param counter: ``counter['requests']`` is increased by the downloads actually submitted.
     :return: Iterator of ``(ticket id, scraper output)``.
     """
 
@@ -219,6 +229,7 @@ def _scrape_in_chunks(start_id: int, end_id: int, known: dict[int, Record]) -> I
     with ThreadPoolExecutor(max_workers=SCRAPE_WORKERS) as executor:
         for chunk_start in range(start_id, end_id + 1, SCRAPE_CHUNK_SIZE):
             chunk = range(chunk_start, min(chunk_start + SCRAPE_CHUNK_SIZE, end_id + 1))
+            counter['requests'] += sum(1 for ticket_id in chunk if ticket_id not in known)
             yield from zip(chunk, executor.map(scrape, chunk), strict=True)
 
 
@@ -228,7 +239,7 @@ def get_plznito_current_data(
     id_window_back: int = ID_WINDOW_BACK_DEFAULT,
     id_lookahead: int = ID_LOOKAHEAD_DEFAULT,
     seed_data_dir: str = SEED_DATA_DIR_DEFAULT,
-) -> dict[str, list[Any]]:
+) -> dict[str, Any]:
     """
     Scrape the web map detail pages of tickets around the anchor id.
 
@@ -239,7 +250,7 @@ def get_plznito_current_data(
     :param id_window_back: How many ids before the anchor to re-check.
     :param id_lookahead: How many ids after the anchor to try.
     :param seed_data_dir: Last-resort anchor source.
-    :return: Update payload ``{"items": [...]}``.
+    :return: Update payload ``{"items": [...], "stats": {...}}``.
     """
     resolved_anchor, anchor_source = _resolve_anchor_id(
         existing_records,
@@ -252,33 +263,56 @@ def get_plznito_current_data(
         id_lookahead=id_lookahead,
     )
 
-    # Every map page also lists the ~100 most recent tickets: one request usually covers most of the window.
-    known = {
-        record_id: record
-        for record_id, record in _collect_valid_records(scrape_map_page(resolved_anchor), "anchor map page")
-        if start_id <= record_id <= end_id
-    }
-    logger.info("Anchor map page covers %d ids of the crawl range.", len(known))
+    # Every map page also lists the ~100 most recent tickets: one request usually covers most of the window,
+    # and the newest listed id tells how far behind the DB is.
+    listed = _collect_valid_records(scrape_map_page(resolved_anchor), "anchor map page")
+    newest_listed = max((record_id for record_id, _ in listed), default=None)
+    # Only when the newest ticket is beyond the normal window; otherwise the window already covers it.
+    if newest_listed is not None and newest_listed >= end_id:
+        end_id = min(newest_listed + id_lookahead, start_id + MAX_CRAWL_IDS)
+        logger.warning(
+            "DB is %d tickets behind plznito.cz (newest listed id %d, anchor %d); catching up ids %d-%d.",
+            newest_listed - resolved_anchor,
+            newest_listed,
+            resolved_anchor,
+            start_id,
+            end_id,
+        )
+    if newest_listed is None:
+        logger.warning("Anchor map page for id %d listed no tickets; crawling id by id.", resolved_anchor)
+    known = {record_id: record for record_id, record in listed if start_id <= record_id <= end_id}
+    logger.info("Anchor map page covers %d ids of the crawl range %d-%d.", len(known), start_id, end_id)
 
-    items = []
+    items: list[Record] = []
     empty_items = 0
     consecutive_failures = 0
     scanned_count = 0
-    for ticket_id, scraped_data in _scrape_in_chunks(start_id, end_id, known):
+    counter = {'requests': 1}  # the anchor map page
+    for ticket_id, scraped_data in _scrape_in_chunks(start_id, end_id, known, counter):
         scanned_count += 1
+        if scanned_count % PROGRESS_LOG_EVERY == 0:
+            logger.info(
+                "Crawl progress: id %d (%d/%d), %d tickets so far.",
+                ticket_id,
+                scanned_count,
+                end_id - start_id + 1,
+                len(items),
+            )
         item = _extract_item(scraped_data)
         if item is None:
             empty_items += 1
             consecutive_failures += 1
-            if consecutive_failures >= MAX_CONSECUTIVE_SCRAPE_FAILURES:
-                logger.warning(
+            # Gaps (deleted tickets) below the newest listed id are expected; only stop beyond it.
+            beyond_newest = newest_listed is None or ticket_id > newest_listed
+            if beyond_newest and consecutive_failures >= MAX_CONSECUTIVE_SCRAPE_FAILURES:
+                logger.info(
                     "Stopping crawl after %d consecutive failures at id %d.",
                     consecutive_failures,
                     ticket_id,
                 )
                 break
             continue
-        logger.info("Downloaded ticket %d via web scraping.", ticket_id)
+        logger.debug("Downloaded ticket %d via web scraping.", ticket_id)
         items.append(item)
         consecutive_failures = 0
 
@@ -293,7 +327,80 @@ def get_plznito_current_data(
         len(items),
         empty_items,
     )
-    return {"items": items}
+    stats: dict[str, Any] = {
+        'anchor': resolved_anchor,
+        'anchor_source': anchor_source,
+        'start_id': start_id,
+        'end_id': end_id,
+        'scanned': scanned_count,
+        'newest_listed': newest_listed,
+        'requests': counter['requests'],
+        'empty': empty_items,
+    }
+    return {"items": items, "stats": stats}
+
+
+def _newest_ticket(records: list[Any]) -> tuple[int, datetime | None] | None:
+    """
+    Id and date of the newest ticket.
+
+    :param records: DB records.
+    :return: ``(id, date)``, or ``None`` for an empty DB.
+    """
+    valid = _collect_valid_records(records, "updated DB")
+    if not valid:
+        return None
+    newest_id, newest_record = max(valid, key=lambda entry: entry[0])
+    return newest_id, _parse_item_datetime(newest_record)[0]
+
+
+def _log_update_summary(
+    data_db: list[Any], data_current: dict[str, Any], data_out: list[Any], db_path: str, started: float
+) -> None:
+    """
+    One INFO line describing the run, plus a WARNING when no new tickets seem to arrive any more.
+
+    :param data_db: Records before the update.
+    :param data_current: Scraped payload with ``stats``.
+    :param data_out: Records written to the DB.
+    :param db_path: DB file path.
+    :param started: ``time.monotonic()`` at the start of the run.
+    """
+    old_ids = {record_id for record_id, _ in _collect_valid_records(data_db, "existing DB")}
+    scraped_ids = [record_id for record_id, _ in _collect_valid_records(data_current["items"], "incoming update")]
+    new_count = sum(1 for record_id in scraped_ids if record_id not in old_ids)
+    stats = data_current.get("stats", {})
+    newest = _newest_ticket(data_out)
+    newest_text = "none"
+    if newest is not None:
+        newest_text = f"#{newest[0]}" + (f" from {newest[1]:%d.%m.%Y}" if newest[1] else "")
+    logger.info(
+        "Update OK in %.1f s: ids %s-%s (anchor %s from %s), %s HTTP requests, %d tickets scraped "
+        "(%d new, %d updated), %s ids without a ticket; %s now has %d records, newest %s.",
+        time.monotonic() - started,
+        stats.get('start_id'),
+        stats.get('end_id'),
+        stats.get('anchor'),
+        stats.get('anchor_source'),
+        stats.get('requests'),
+        len(scraped_ids),
+        new_count,
+        len(scraped_ids) - new_count,
+        stats.get('empty'),
+        db_path,
+        len(data_out),
+        newest_text,
+    )
+    if new_count == 0 and newest is not None and newest[1] is not None:
+        age_days = (datetime.now() - newest[1]).days
+        if age_days > STALE_AFTER_DAYS:
+            logger.warning(
+                "No new tickets: the newest ticket #%d is %d days old. Check that plznito.cz is reachable and "
+                "the map page format has not changed (python -m plznito_monitoring.scrape_one %d --source web).",
+                newest[0],
+                age_days,
+                newest[0] + 1,
+            )
 
 
 def _load_record_list(path: str | None, missing_ok_label: str) -> list[Any]:
@@ -458,6 +565,7 @@ def db_update(
     :param id_lookahead: How many ids after the anchor to try.
     :param seed_data_dir: Last-resort anchor source.
     """
+    started = time.monotonic()
     data_db = _load_record_list(json_db_file_path, "DB file")
 
     data_current = get_plznito_current_data(
@@ -474,12 +582,14 @@ def db_update(
     if filter_cyklo:
         data_cyklo_updated = merge_data(data_db, filter_data(data_current))
         atomic_write_json(json_db_file_path, data_cyklo_updated)
+        data_out = data_cyklo_updated
         if write_cyklo_json_path:
             atomic_write_json(write_cyklo_json_path, data_cyklo_updated)
             logger.info("Wrote derived cycling DB to %s.", write_cyklo_json_path)
     else:
         data_updated = merge_data(data_db, data_current["items"])
         atomic_write_json(json_db_file_path, data_updated)
+        data_out = data_updated
         if write_cyklo_json_path:
             data_cyklo_updated = filter_cyklo_items(data_updated)
             atomic_write_json(write_cyklo_json_path, data_cyklo_updated)
@@ -489,7 +599,7 @@ def db_update(
                 len(data_cyklo_updated),
             )
 
-    logger.info("Merging finished. Output file: %s", json_db_file_path)
+    _log_update_summary(data_db, data_current, data_out, json_db_file_path, started)
 
 
 def main() -> None:
@@ -508,10 +618,22 @@ def main() -> None:
     parser.set_defaults(filter_cyklo=None)
     args = parser.parse_args()
 
-    logging.basicConfig(filename=LOG_FILE_DEFAULT, level=logging.INFO, format='%(asctime)s %(message)s')
-
+    setup_logging(LOG_FILE_DEFAULT)
     logger.info("Running with args: %s", args)
+    try:
+        _run(args)
+    except Exception:
+        # Top-level crash handler: the traceback goes to the log file and to stderr (cron/deploy log).
+        logger.exception("Plznito update failed.")
+        raise SystemExit(1) from None
 
+
+def _run(args: argparse.Namespace) -> None:
+    """
+    Run the update or restore selected by the command line.
+
+    :param args: Parsed arguments.
+    """
     if args.filter_cyklo is None:
         filter_cyklo = os.path.basename(args.db_json) == CYKLO_DB_FILENAME
     else:

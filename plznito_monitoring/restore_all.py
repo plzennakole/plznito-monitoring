@@ -110,7 +110,8 @@ def scrape_one_id_from_map(ticket_id: int) -> dict[str, Any]:
         if str(item.get("id")) == str(ticket_id):
             return {"item": item}
 
-    logger.warning("No matching item for id %s in map page", ticket_id)
+    # Expected for deleted tickets and for ids not created yet; the crawl summary counts them.
+    logger.debug("No matching item for id %s in map page", ticket_id)
     return {}
 
 

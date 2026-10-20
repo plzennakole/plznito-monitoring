@@ -3,7 +3,9 @@
 
 import contextlib
 import json
+import logging
 import os
+import sys
 import tempfile
 from collections.abc import Iterator
 from typing import Any, TextIO
@@ -50,6 +52,26 @@ def status_label(status_id: int) -> str:
     :return: Known label, or ``"Stav <id>"`` for unknown ids.
     """
     return STATUS_LABELS.get(status_id, f"Stav {status_id}")
+
+
+def setup_logging(log_file: str, level: int = logging.INFO) -> None:
+    """
+    Log to ``log_file`` at ``level``, and warnings/errors also to stderr.
+
+    Cron mails and deploy logs then show only problems, the file has the full story.
+
+    :param log_file: Log file path.
+    :param level: Level for the log file.
+    """
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(level)
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.WARNING)
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+        handlers=[file_handler, stderr_handler],
+    )
 
 
 def parse_int(value: Any) -> int | None:

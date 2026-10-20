@@ -89,6 +89,22 @@ plznito_monitoring/download_and_render.sh   # works from any directory; PYTHON=.
 0 */6 * * * /path/to/plznito-monitoring/plznito_monitoring/download_and_render.sh
 ```
 
+**Logs:** `plznito_monitoring/plznito_monitoring.log` has the details; stderr (cron mail, deploy log) only gets warnings and errors. Each run ends with one line like
+
+```
+INFO plznito_monitoring.run_db_update: Update OK in 12.4 s: ids 55286-55586 (anchor 55386 from db), 49 HTTP requests, 83 tickets scraped (5 new, 78 updated), 76 ids without a ticket; plznito_monitoring/plznito_all.json now has 48112 records, newest #55391 from 20.10.2026.
+```
+
+and the wrapper adds `job: <step> finished in N s` or `job: <step> FAILED with exit code N`. A run that finds no new ticket while the newest one is more than 3 days old logs a warning. If the DB has fallen behind (e.g. the job did not run for a while), the next run catches up to the newest ticket listed on plznito.cz (at most 20 000 ids per run) and says so in the log.
+
+**uWSGI:** "OSError: write error" / "uwsgi_response_write_body_do(): Broken pipe" means a browser closed the connection before the response was sent; it cannot be retried server-side. Map pages are served gzipped (16 MB -> ~2.4 MB) with `ETag`/`Last-Modified`, so this is now rare. To keep such disconnects out of the error log, add to the uWSGI config:
+
+```ini
+ignore-sigpipe = true
+ignore-write-errors = true
+disable-write-exception = true
+```
+
 **JSON API** (`app/plznito_api.py`, docs at `/plznito/api/docs`, spec at `/plznito/api/openapi.json`):
 
 | Method | Path | Description |

@@ -4,6 +4,8 @@ import unittest
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import pytest
+
 from plznito_monitoring import run_db_update as db_update
 from plznito_monitoring.common import parse_int
 
@@ -249,7 +251,7 @@ class RunDbUpdateTests(unittest.TestCase):
             {"id": 101, "name": "from page"},
             {"id": 102, "name": "from page"},
             {"id": 105, "name": "from page"},
-            {"id": 999, "name": "outside crawl range"},
+            {"id": 50, "name": "older than the crawl range"},
         ]
         with (
             patch.object(db_update, "download_one_id", side_effect=fake_download),
@@ -260,7 +262,7 @@ class RunDbUpdateTests(unittest.TestCase):
         mock_page.assert_called_once_with(102)
         self.assertEqual([item["id"] for item in payload["items"]], [101, 102, 103, 105])
         self.assertEqual(payload["items"][0]["name"], "from page")
-        # Only ids missing from the anchor page are downloaded; 999 is outside 101..107.
+        # Only ids missing from the anchor page are downloaded; 50 is before 101..107.
         self.assertEqual(sorted(calls), [103, 104, 106, 107])
 
     def test_db_update_writes_all_and_derives_cyklo_without_second_scrape(self):
@@ -297,3 +299,96 @@ class RunDbUpdateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _fake_site(existing_ids, listed_ids):
+    """download_one_id / scrape_map_page fakes for a site with the given ticket ids."""
+    calls = []
+
+    def fake_download(ticket_id, source="auto"):
+        calls.append(ticket_id)
+        return {"item": {"id": ticket_id, "name": "t"}} if ticket_id in existing_ids else {}
+
+    def fake_page(ticket_id):
+        return [{"id": listed_id, "name": "t"} for listed_id in listed_ids]
+
+    return calls, fake_download, fake_page
+
+
+def test_crawl_catches_up_when_db_is_far_behind():
+    # DB ends at 100, the site already has tickets up to 600 (with a gap of deleted ids 300-320).
+    existing = set(range(101, 300)) | set(range(321, 601))
+    calls, fake_download, fake_page = _fake_site(existing, listed_ids=range(501, 601))
+    with (
+        patch.object(db_update, "download_one_id", side_effect=fake_download),
+        patch.object(db_update, "scrape_map_page", side_effect=fake_page),
+    ):
+        payload = db_update.get_plznito_current_data([{"id": 100}], id_window_back=0, id_lookahead=20)
+
+    ids = [item["id"] for item in payload["items"]]
+    assert ids[0] == 100 or ids[0] == 101
+    assert max(ids) == 600
+    assert set(ids) >= existing  # nothing missed, the gap of 21 ids did not stop the crawl
+    # Ids listed on the anchor page are not downloaded again.
+    assert not set(calls) & set(range(501, 601))
+    assert payload["stats"]["newest_listed"] == 600
+    assert payload["stats"]["requests"] == 1 + len(calls)
+
+
+def test_crawl_catch_up_is_capped(monkeypatch):
+    monkeypatch.setattr(db_update, "MAX_CRAWL_IDS", 50)
+    calls, fake_download, fake_page = _fake_site(set(range(1, 10000)), listed_ids=[9999])
+    with (
+        patch.object(db_update, "download_one_id", side_effect=fake_download),
+        patch.object(db_update, "scrape_map_page", side_effect=fake_page),
+    ):
+        payload = db_update.get_plznito_current_data([{"id": 100}], id_window_back=0, id_lookahead=20)
+    assert payload["stats"]["end_id"] == 150
+    assert max(item["id"] for item in payload["items"]) == 150
+
+
+def test_crawl_still_stops_after_failures_beyond_newest_listed():
+    calls, fake_download, fake_page = _fake_site(set(range(1, 106)), listed_ids=[105])
+    with (
+        patch.object(db_update, "download_one_id", side_effect=fake_download),
+        patch.object(db_update, "scrape_map_page", side_effect=fake_page),
+    ):
+        db_update.get_plznito_current_data([{"id": 100}], id_window_back=0, id_lookahead=200)
+    # It stops 10 failures after the newest listed id; ids of an already submitted chunk are still fetched.
+    stop_id = 105 + db_update.MAX_CONSECUTIVE_SCRAPE_FAILURES
+    assert stop_id <= max(calls) < stop_id + db_update.SCRAPE_CHUNK_SIZE
+
+
+def test_db_update_logs_summary_and_warns_when_stale(tmp_path, caplog):
+    db_path = tmp_path / "plznito_all.json"
+    db_path.write_text(json.dumps([{"id": 7, "name": "old", "date": "01.01.2020"}]), encoding="utf-8")
+    payload = {
+        "items": [{"id": 7, "name": "old", "status_id": 3}],
+        "stats": {"start_id": 1, "end_id": 9, "anchor": 7, "anchor_source": "db", "requests": 3},
+    }
+    with (
+        patch.object(db_update, "get_plznito_current_data", return_value=payload),
+        caplog.at_level("INFO", logger=db_update.logger.name),
+    ):
+        db_update.db_update(str(db_path), filter_cyklo=False)
+
+    summary = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Update OK")]
+    assert len(summary) == 1
+    assert (
+        "3 HTTP requests" in summary[0]
+        and "(0 new, 1 updated)" in summary[0]
+        and "newest #7 from 01.01.2020" in summary[0]
+    )
+    assert any(r.levelname == "WARNING" and "No new tickets" in r.getMessage() for r in caplog.records)
+
+
+def test_main_logs_traceback_and_exits_nonzero(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(db_update, "LOG_FILE_DEFAULT", str(tmp_path / "update.log"))
+    monkeypatch.setattr("sys.argv", ["run_db_update", "--db_json", str(tmp_path / "db.json")])
+    with (
+        patch.object(db_update, "db_update", side_effect=RuntimeError("site down")),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        db_update.main()
+    assert exit_info.value.code == 1
+    assert any(r.levelname == "ERROR" and r.exc_info for r in caplog.records)

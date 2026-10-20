@@ -1,4 +1,6 @@
 # Copyright 2026 Plzeň na kole Inc. All rights reserved.
+import gzip
+import os
 import pathlib
 from collections.abc import Iterator
 from unittest.mock import patch
@@ -7,7 +9,7 @@ import pytest
 from flask.testing import FlaskClient
 from jinja2 import ChoiceLoader, FileSystemLoader
 
-from app import app, bikecounters
+from app import app, bikecounters, maps
 from plznito_monitoring import run_map_render as map_render
 
 
@@ -80,6 +82,9 @@ def test_bikecounters_page_supports_conditional_requests(client: FlaskClient) ->
     assert client.get('/bikecounters', headers={'If-Modified-Since': last_modified}).status_code == 304
 
 
+rendered_maps_dir: list[pathlib.Path] = []
+
+
 @pytest.fixture
 def rendered_maps(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Serve small freshly rendered maps instead of the (git-ignored) generated ones."""
@@ -91,12 +96,15 @@ def rendered_maps(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> It
         'longitude': '13.37',
         'created': {'date': '2025-01-10 10:00:00.000000'},
     }
+    rendered_maps_dir.append(tmp_path)
     for name in ('plznito_map.html', 'plznito_map_all.html'):
         (tmp_path / name).write_text(map_render.get_map([item]), encoding='utf-8')
     monkeypatch.setattr(app, 'jinja_loader', ChoiceLoader([FileSystemLoader(str(tmp_path)), app.jinja_loader]))
     app.jinja_env.cache.clear()
+    maps._page_cache.clear()
     yield
     app.jinja_env.cache.clear()
+    maps._page_cache.clear()
 
 
 @pytest.mark.parametrize('path', ['/plznito/map-bike', '/plznito/map-all'])
@@ -110,3 +118,33 @@ def test_map_pages_header_and_embed(
     assert ('class="pz-header"' in body) is has_header
     assert '<meta name="viewport"' in body
     assert 'id="plznito-app"' in body
+
+
+def test_map_page_is_gzipped_and_cacheable(client: FlaskClient, rendered_maps: None) -> None:
+    plain = client.get('/plznito/map-bike')
+    zipped = client.get('/plznito/map-bike', headers={'Accept-Encoding': 'gzip, br'})
+    assert 'Content-Encoding' not in plain.headers
+    assert zipped.headers['Content-Encoding'] == 'gzip'
+    assert gzip.decompress(zipped.get_data()) == plain.get_data()
+    assert 'Accept-Encoding' in zipped.headers['Vary']
+    assert zipped.headers['Cache-Control'] == 'public, max-age=300'
+    assert zipped.headers['ETag'] != plain.headers['ETag']
+
+    again = client.get(
+        '/plznito/map-bike',
+        headers={'Accept-Encoding': 'gzip', 'If-None-Match': zipped.headers['ETag']},
+    )
+    assert again.status_code == 304
+    assert again.get_data() == b''
+
+
+def test_map_page_picks_up_a_new_render(client: FlaskClient, rendered_maps: None) -> None:
+    first = client.get('/plznito/map-bike')
+    map_file = rendered_maps_dir[-1] / 'plznito_map.html'
+    map_file.write_text('<div id="plznito-app">NEW RENDER</div>', encoding='utf-8')
+    mtime = map_file.stat().st_mtime + 10
+    os.utime(map_file, (mtime, mtime))
+
+    second = client.get('/plznito/map-bike', headers={'If-None-Match': first.headers['ETag']})
+    assert second.status_code == 200
+    assert 'NEW RENDER' in second.get_data(as_text=True)
