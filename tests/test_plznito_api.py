@@ -1,7 +1,5 @@
 # Copyright 2026 Plzeň na kole Inc. All rights reserved.
 import datetime
-import json
-import os
 import pathlib
 from collections.abc import Iterator
 from unittest.mock import patch
@@ -10,14 +8,14 @@ import pytest
 from flask.testing import FlaskClient
 
 from app import app, plznito_api
-from tests.test_plznito_store import RECORDS, _api_record
+from tests.test_plznito_store import RECORDS, UPDATED_AT, _api_record, write_db
 
 
 @pytest.fixture
 def client(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[FlaskClient]:
-    db_path = tmp_path / 'plznito_all.json'
-    db_path.write_text(json.dumps(RECORDS), encoding='utf-8')
-    monkeypatch.setenv('PLZNITO_DB_JSON', str(db_path))
+    db_path = tmp_path / 'plznito.db'
+    write_db(db_path, RECORDS)
+    monkeypatch.setenv('PLZNITO_DB', str(db_path))
     monkeypatch.setattr(plznito_api, '_stores', {})
     app.config['TESTING'] = True
     with app.test_client() as test_client:
@@ -146,9 +144,7 @@ def test_data_reload_invalidates_conditional_request(client: FlaskClient) -> Non
     last_modified = client.get('/plznito/api/meta').headers['Last-Modified']
 
     db_path = pathlib.Path(plznito_api.db_path_from_env())
-    db_path.write_text(json.dumps(RECORDS + [_api_record(6, '2026-04-01')]), encoding='utf-8')
-    mtime = db_path.stat().st_mtime + 10
-    os.utime(db_path, (mtime, mtime))
+    write_db(db_path, [_api_record(6, '2026-04-01')], finished_at=UPDATED_AT + datetime.timedelta(hours=6))
 
     response = client.get('/plznito/api/meta', headers={'If-Modified-Since': last_modified})
     assert response.status_code == 200
