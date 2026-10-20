@@ -21,6 +21,7 @@ Server configuration is in `config.json` (port, debug mode, WSGI backend: `flask
 | GET | `/` | Endpoint listing |
 | GET | `/plznito/map-bike` | Plzeň cycling ticket map |
 | GET | `/plznito/map-all` | Plzeň all-tickets map |
+| GET | `/plznito/api/docs` | Plznito JSON API docs (Swagger UI), see below |
 | GET | `/train_delays/` | Train delays JSON (cached) |
 | GET | `/bikecounters` | Cycling counters SPA |
 | GET | `/bikecounters/api/nav` | Navigation tree (ECO-counter + cameras) |
@@ -85,6 +86,17 @@ crontab -e
 # append:
 0 */6 * * * cd /path/to/plznito-monitoring/plznito_monitoring && python run_db_update.py --db_json plznito_all.json --write-cyklo-json plznito_cyklo.json && python run_map_render.py --file_in plznito_cyklo.json --file_out templates/plznito_map.html && python run_map_render.py --cluster_style --popup_mode full --file_in plznito_all.json --file_out templates/plznito_map_all.html
 ```
+
+**JSON API** (`app/plznito_api.py`, docs at `/plznito/api/docs`, spec at `/plznito/api/openapi.json`):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/plznito/api/issues` | Issues, newest first. Filters: `since`, `until` (YYYY-MM-DD), `status_id`, `category_id`, `cyklo`, `since_id`; paging: `limit` (≤1000), `offset` |
+| GET | `/plznito/api/issues/new?days=7` | Issues from today and the previous N days (same filters/paging) |
+| GET | `/plznito/api/issues/<id>` | Single issue |
+| GET | `/plznito/api/meta` | Last update time, totals, statuses and categories with counts |
+
+The API reads `plznito_all.json` (override with `PLZNITO_DB_JSON`) into memory and reloads it when the file's mtime changes, i.e. after each cron run. Responses carry `Last-Modified` and `Cache-Control: public, max-age=300`; clients sending `If-Modified-Since` get `304` until new data is downloaded. For incremental sync, store the highest seen `id` and ask for `?since_id=<id>`.
 
 ---
 

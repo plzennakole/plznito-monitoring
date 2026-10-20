@@ -17,18 +17,17 @@ def is_cyklo_record(report_text, name_text):
     )
 
 
+def is_cyklo_item(item):
+    if not isinstance(item, dict):
+        return False
+
+    report_text = to_lower_text(item.get("report"))
+    name_text = to_lower_text(item.get("name"))
+    if not report_text and not name_text:
+        return False
+
+    return is_cyklo_record(report_text, name_text) and "recykl" not in report_text
+
+
 def filter_cyklo_items(items):
-    data_cyklo = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-
-        report_text = to_lower_text(item.get("report"))
-        name_text = to_lower_text(item.get("name"))
-        if not report_text and not name_text:
-            continue
-
-        if is_cyklo_record(report_text, name_text) and "recykl" not in report_text:
-            data_cyklo.append(item)
-
-    return data_cyklo
+    return [item for item in items if is_cyklo_item(item)]

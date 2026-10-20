@@ -8,3 +8,6 @@ fake-headers
 tqdm
 simplejson
 json5
+flask-smorest
+python-dotenv
+pytest
