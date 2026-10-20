@@ -1,15 +1,17 @@
-import json
-import os
-import datetime
-import logging
 import argparse
-import tempfile
+import datetime
+import json
+import logging
+import os
 import re
+import tempfile
 from collections import Counter
+from pathlib import Path
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
+PLZNITO_DIR = Path(__file__).parent
 
 
 DATE_FORMATS = (
@@ -130,7 +132,7 @@ def _resolve_category_filter(category_id, category_value):
 def _to_unix_timestamp(value):
     if value.tzinfo is None:
         return int(value.replace(tzinfo=PLZNITO_TZ).timestamp())
-    return int(value.astimezone(datetime.timezone.utc).timestamp())
+    return int(value.astimezone(datetime.UTC).timestamp())
 
 
 def _sanitize_photo_url(item):
@@ -758,7 +760,8 @@ def get_map(data_current, cluster=False, popup_mode="compact"):
     return _build_map_html(serialized_data, cluster=cluster)
 
 
-def render_map_to_file(file_in="plznito_cyklo.json", file_out="app/templates/map.html",
+def render_map_to_file(file_in=str(PLZNITO_DIR / "plznito_cyklo.json"),
+                       file_out=str(PLZNITO_DIR / "templates" / "plznito_map.html"),
                        cluster=False, popup_mode="compact"):
     logger.info("Loading data from %s", file_in)
     with open(file_in, encoding="utf-8") as fr:
@@ -796,14 +799,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--log_level", type=str, default="INFO",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
-    parser.add_argument("--file_in", type=str, default="plznito_cyklo.json")
-    parser.add_argument("--file_out", type=str, default="app/templates/map.html")
+    parser.add_argument("--file_in", type=str, default=str(PLZNITO_DIR / "plznito_cyklo.json"))
+    parser.add_argument("--file_out", type=str, default=str(PLZNITO_DIR / "templates" / "plznito_map.html"))
     parser.add_argument("--cluster_style", action="store_true")
     parser.add_argument("--popup_mode", type=str, default="compact", choices=["compact", "full"])
     args = parser.parse_args()
 
     log_level = getattr(logging, args.log_level.upper(), logging.INFO)
-    logging.basicConfig(filename='plznito_monitoring.log',
+    logging.basicConfig(filename=str(PLZNITO_DIR / "plznito_monitoring.log"),
                         level=log_level,
                         format='%(asctime)s %(message)s')
     logger.setLevel(log_level)

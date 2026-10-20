@@ -1,17 +1,10 @@
-import importlib.util
-import pathlib
 from datetime import date
 from unittest.mock import patch
 
 import pytest
 
-from app import app
 from app import routes
-
-_YOY_PATH = pathlib.Path(__file__).parent.parent / 'bikecounters_web' / 'yoy.py'
-_spec = importlib.util.spec_from_file_location('yoy', _YOY_PATH)
-yoy = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(yoy)
+from bikecounters_web import yoy
 
 
 def _row(ts: str, bikes: int, scooters: int = 0) -> dict:
@@ -118,13 +111,6 @@ def test_period_yoy(daily: dict, start: date, end: date, expected: dict) -> None
 
 # ── Routes ───────────────────────────────────────────────────────────────────
 
-@pytest.fixture
-def client():
-    app.config['TESTING'] = True
-    with app.test_client() as test_client:
-        yield test_client
-
-
 def test_api_yoy_location_unknown_returns_404(client) -> None:
     with patch.object(routes, 'query') as mock_query:
         response = client.get('/bikecounters/api/yoy/does_not_exist')
@@ -163,3 +149,9 @@ def test_api_yoy_all_skips_locations_without_collectors(client) -> None:
     assert 'cam_malesice' not in ids
     assert 'eco_prazdroj' in ids
     routes.cache.clear()
+
+
+def test_bikecounters_page(client) -> None:
+    response = client.get('/bikecounters')
+    assert response.status_code == 200
+    assert response.mimetype == 'text/html'

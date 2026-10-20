@@ -1,12 +1,9 @@
 # Copyright 2026 Pexeso Inc. All rights reserved.
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app import app
-from app import routes
-from app import train_delays
-
+from app import routes, train_delays
 
 # Markup mirrors the real Babitron page: uppercase tags, unquoted attributes
 # and <TD> cells that are never explicitly closed.
@@ -174,15 +171,6 @@ def test_scrape_raises_on_http_error(mock_get: MagicMock) -> None:
 
 
 # ── /train_delays/ endpoint ───────────────────────────────────────────────────
-
-@pytest.fixture
-def client():
-    routes.cache.clear()
-    app.config['TESTING'] = True
-    with app.test_client() as test_client:
-        yield test_client
-    routes.cache.clear()
-
 
 @patch('app.routes.scrape_babitron_delays')
 def test_endpoint_merges_both_sources(mock_scrape: MagicMock, client) -> None:

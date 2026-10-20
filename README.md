@@ -37,54 +37,51 @@ Server configuration is in `config.json` (port, debug mode, WSGI backend: `flask
 
 Scrapes civic tickets from plzni.to and renders interactive Folium maps.
 
+All commands run from the repo root as modules (`python -m ...`). Defaults (log file, `data/` seed dir, snapshots) live in `plznito_monitoring/`, regardless of the working directory.
+
 **Update ticket data:**
 ```shell
-cd plznito_monitoring
-
-# Update cycling tickets only
-python run_db_update.py --db_json plznito_cyklo.json
+# Update cycling tickets only (default --db_json is plznito_monitoring/plznito_cyklo.json)
+python -m plznito_monitoring.run_db_update
 
 # Update all tickets
-python run_db_update.py --db_json plznito_all.json
+python -m plznito_monitoring.run_db_update --db_json plznito_monitoring/plznito_all.json
 
 # Update all tickets and derive cycling subset in one pass
-python run_db_update.py --db_json plznito_all.json --write-cyklo-json plznito_cyklo.json
+python -m plznito_monitoring.run_db_update --db_json plznito_monitoring/plznito_all.json \
+    --write-cyklo-json plznito_monitoring/plznito_cyklo.json
 ```
 
 Optional crawl tuning:
 ```shell
-python run_db_update.py --db_json plznito_cyklo.json \
-    --anchor-id 49553 --id-window-back 500 --id-lookahead 300 --seed-data-dir data
+python -m plznito_monitoring.run_db_update --anchor-id 49553 --id-window-back 500 --id-lookahead 300
 ```
 
 Restore-only mode (no live scrape):
 ```shell
-python run_db_update.py --restore --db_json plznito_cyklo.json
+python -m plznito_monitoring.run_db_update --restore
 ```
 
 **Render maps:**
 ```shell
-python run_map_render.py --file_in plznito_cyklo.json \
-    --file_out templates/plznito_map.html
+python -m plznito_monitoring.run_map_render --file_in plznito_monitoring/plznito_cyklo.json \
+    --file_out plznito_monitoring/templates/plznito_map.html
 
-python run_map_render.py --cluster_style --popup_mode full \
-    --file_in plznito_all.json \
-    --file_out templates/plznito_map_all.html
+python -m plznito_monitoring.run_map_render --cluster_style --popup_mode full \
+    --file_in plznito_monitoring/plznito_all.json \
+    --file_out plznito_monitoring/templates/plznito_map_all.html
 ```
 
 `--popup_mode compact` (default) produces smaller output; `full` includes the complete ticket text.
 
 **Full pipeline (download + render):**
 ```shell
-cd plznito_monitoring
-bash download_and_render.sh
+plznito_monitoring/download_and_render.sh   # works from any directory; PYTHON=... to pick the interpreter
 ```
 
 **Cron setup** (every 6 hours):
 ```shell
-crontab -e
-# append:
-0 */6 * * * cd /path/to/plznito-monitoring/plznito_monitoring && python run_db_update.py --db_json plznito_all.json --write-cyklo-json plznito_cyklo.json && python run_map_render.py --file_in plznito_cyklo.json --file_out templates/plznito_map.html && python run_map_render.py --cluster_style --popup_mode full --file_in plznito_all.json --file_out templates/plznito_map_all.html
+0 */6 * * * /path/to/plznito-monitoring/plznito_monitoring/download_and_render.sh
 ```
 
 **JSON API** (`app/plznito_api.py`, docs at `/plznito/api/docs`, spec at `/plznito/api/openapi.json`):
@@ -104,28 +101,26 @@ The API reads `plznito_all.json` (override with `PLZNITO_DB_JSON`) into memory a
 
 Downloads ECO-counter and camera data from [opendata.plzen.eu](https://opendata.plzen.eu) and weather from ČHMÚ into a local SQLite database (`bikecounters_web/cyklo.db`).
 
-**Update data:**
+**Update data** (from the repo root):
 ```shell
-cd bikecounters_web
-
 # Update everything (counters + weather)
-python ingest.py
+python -m bikecounters_web.ingest
 
 # Skip weather fetch
-python ingest.py --no-weather
+python -m bikecounters_web.ingest --no-weather
 
 # Only a specific source
-python ingest.py --source eco      # ECO-counter only
-python ingest.py --source cam      # cameras only
-python ingest.py --source weather  # weather only
+python -m bikecounters_web.ingest --source eco      # ECO-counter only
+python -m bikecounters_web.ingest --source cam      # cameras only
+python -m bikecounters_web.ingest --source weather  # weather only
 
 # Force re-download of cached ČHMÚ historical CSVs
-python ingest.py --delete-cache
+python -m bikecounters_web.ingest --delete-cache
 ```
 
-**Cron setup** (daily at 03:00):
+**Cron setup** (daily at 03:00; the wrapper logs to `bikecounters_web/ingest.log`):
 ```shell
-0 3 * * * cd /path/to/plznito-monitoring/bikecounters_web && python ingest.py
+0 3 * * * /path/to/plznito-monitoring/bikecounters_web/run_update.sh
 ```
 
 

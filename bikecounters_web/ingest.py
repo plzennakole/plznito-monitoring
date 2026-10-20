@@ -2,27 +2,25 @@
 """
 ingest.py — Download all cycling counter data + weather into SQLite.
 
-Usage:
-    python3 ingest.py                   # update all sources
-    python3 ingest.py --no-weather      # skip ČHMÚ fetch
-    python3 ingest.py --delete-cache    # force re-download of ČHMÚ historical CSVs
-    python3 ingest.py --source eco      # only eco-counter
-    python3 ingest.py --source cam      # only cameras
+Usage (from the repo root):
+    python3 -m bikecounters_web.ingest                   # update all sources
+    python3 -m bikecounters_web.ingest --no-weather      # skip ČHMÚ fetch
+    python3 -m bikecounters_web.ingest --delete-cache    # force re-download of ČHMÚ historical CSVs
+    python3 -m bikecounters_web.ingest --source eco      # only eco-counter
+    python3 -m bikecounters_web.ingest --source cam      # only cameras
 """
 
 import argparse
-import io
-import json
 import logging
 import shutil
 import sqlite3
 import sys
 import time
-from datetime import date as dt_date, datetime
+from datetime import date as dt_date
+from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-import config as cfg
+from bikecounters_web import config as cfg
 
 logging.basicConfig(
     level=logging.INFO,
@@ -98,8 +96,10 @@ def ingest_ecocounter():
 
     header = [h.strip().strip('"').lower() for h in lines[0].split(";")]
     def col(name):
-        try: return header.index(name)
-        except ValueError: return None
+        try:
+            return header.index(name)
+        except ValueError:
+            return None
 
     i_site = col("siteid") or col("site_id")
     i_ts   = col("timestamp")
@@ -260,7 +260,7 @@ def ingest_camera(cam_id: str, name: str):
     log.info("  %d records, collectors: %s", len(rows), found)
 
     # Update Malesice collector list dynamically if empty
-    loc = next((l for l in cfg.LOCATIONS if l.get("cam_id") == cam_id), None)
+    loc = next((location for location in cfg.LOCATIONS if location.get("cam_id") == cam_id), None)
     if loc and not loc["collectors"]:
         for i, sid in enumerate(found):
             coll_id = sid.split("_c")[-1]
@@ -283,7 +283,7 @@ def _next_month(d: dt_date) -> dt_date:
 
 def _chmi_parse_csv(text: str, var: str) -> dict:
     """Parse ČHMÚ historical daily CSV. Returns {date_str: float|None}."""
-    result = {}
+    result: dict[str, float | None] = {}
     lines = text.splitlines()
     if not lines:
         return result
@@ -294,7 +294,8 @@ def _chmi_parse_csv(text: str, var: str) -> dict:
     def idx(*names):
         for name in names:
             for i, h in enumerate(header):
-                if h == name: return i
+                if h == name:
+                    return i
         return None
 
     dt_col  = idx("dt", "date", "datum")
@@ -311,12 +312,14 @@ def _chmi_parse_csv(text: str, var: str) -> dict:
         return result
 
     for line in lines[1:]:
-        if not line.strip(): continue
+        if not line.strip():
+            continue
         parts = line.split(delim)
         try:
             if use_dt:
                 date_str = str(parts[dt_col])[:10]
-                if len(date_str) < 10 or not date_str[:4].isdigit(): continue
+                if len(date_str) < 10 or not date_str[:4].isdigit():
+                    continue
             else:
                 date_str = f"{int(parts[yr_col]):04d}-{int(parts[mo_col]):02d}-{int(parts[dy_col]):02d}"
             raw = parts[val_col].strip().strip('"')
@@ -328,7 +331,7 @@ def _chmi_parse_csv(text: str, var: str) -> dict:
 
 def _chmi_parse_recent_json(data) -> dict:
     """Parse ČHMÚ recent daily JSON. Returns {date: {"t": float|None, "p": float|None}}."""
-    result = {}
+    result: dict[str, dict[str, float | None]] = {}
     try:
         inner  = data["data"]["data"]
         header = [h.strip() for h in inner["header"].split(",")]
@@ -337,16 +340,20 @@ def _chmi_parse_recent_json(data) -> dict:
         return result
 
     def idx(name):
-        try: return header.index(name)
-        except ValueError: return None
+        try:
+            return header.index(name)
+        except ValueError:
+            return None
 
     i_el, i_vt, i_dt, i_val = idx("ELEMENT"), idx("VTYPE"), idx("DT"), idx("VAL")
-    if None in (i_el, i_vt, i_dt, i_val): return result
+    if None in (i_el, i_vt, i_dt, i_val):
+        return result
 
     for row in values:
         try:
             element, vtype, raw_dt, raw_val = str(row[i_el]), str(row[i_vt]), str(row[i_dt]), row[i_val]
-        except (IndexError, TypeError): continue
+        except (IndexError, TypeError):
+            continue
 
         if element == "T" and vtype == "AVG":
             var_key = "t"
@@ -367,7 +374,7 @@ def _chmi_parse_recent_json(data) -> dict:
 
 def ingest_weather(delete_cache=False):
     try:
-        import requests
+        import requests  # noqa: F401 - availability check only
     except ImportError:
         log.warning("requests not available, skipping weather")
         return
@@ -427,7 +434,8 @@ def ingest_weather(delete_cache=False):
         for url in candidates:
             try:
                 r = req.get(url, timeout=30)
-                if r.status_code == 404: continue
+                if r.status_code == 404:
+                    continue
                 r.raise_for_status()
                 parsed = _chmi_parse_recent_json(r.json())
                 n = 0
@@ -435,7 +443,8 @@ def ingest_weather(delete_cache=False):
                     for k, v in vd.items():
                         weather.setdefault(d, {}).setdefault(k, v)
                     n += 1
-                if n: log.info("  recent %s: %d days", ym, n)
+                if n:
+                    log.info("  recent %s: %d days", ym, n)
                 break
             except Exception as exc:
                 log.debug("  recent %s (%s): %s", ym, url.split("/")[-2], exc)

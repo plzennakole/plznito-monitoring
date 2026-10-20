@@ -32,7 +32,7 @@ def monthly_stats(daily: dict[date, int]) -> list[dict]:
     :param daily: Totals per day, as returned by :func:`daily_totals`.
     :return: Sorted list of ``{'year', 'month', 'days', 'total', 'avg'}``.
     """
-    months = {}
+    months: dict[tuple[int, int], dict[str, int]] = {}
     for day, total in daily.items():
         entry = months.setdefault((day.year, day.month), {'days': 0, 'total': 0})
         entry['days'] += 1

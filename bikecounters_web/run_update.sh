@@ -11,9 +11,9 @@ fi
 
 echo "──────────────────────────────────────" >> "$LOG"
 echo "$(date '+%Y-%m-%d %H:%M:%S')  START" >> "$LOG"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR/.."
 
-if "$PYTHON" ingest.py "$@" >> "$LOG" 2>&1; then
+if "$PYTHON" -m bikecounters_web.ingest "$@" >> "$LOG" 2>&1; then
     echo "$(date '+%Y-%m-%d %H:%M:%S')  OK" >> "$LOG"
 else
     echo "$(date '+%Y-%m-%d %H:%M:%S')  FAILED (exit $?)" >> "$LOG"

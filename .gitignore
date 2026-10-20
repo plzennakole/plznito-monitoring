@@ -87,9 +87,13 @@ venv.bak/
 # this project
 /plznito_cyklo.json
 *.json
-/app/templates/map.html
-/app/templates/map_all.html
-/app/templates/map_missing.html
 /bikecounters_web/cyklo.db
+/bikecounters_web/cyklo.db-*
+/bikecounters_web/chmi_cache/
+/plznito_monitoring/templates/plznito_map.html
+/plznito_monitoring/templates/plznito_map_all.html
+/plznito_monitoring/notebooks/
+.DS_Store
+.idea/
 /plznito_monitoring/data/
 /data/**

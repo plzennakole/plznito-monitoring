@@ -3,9 +3,7 @@ import unicodedata
 
 import requests
 from bs4 import BeautifulSoup
-
 from fake_headers import Headers
-
 
 TRAIN_ID_RE = re.compile(r"\b([A-Za-z]{1,6})\s*([0-9]{1,6})\b")
 TIME_RE = re.compile(r"\b([0-2]?\d:[0-5]\d)\b")

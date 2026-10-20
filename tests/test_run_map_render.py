@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime
 
-import run_map_render as map_render
+from plznito_monitoring import run_map_render as map_render
 
 
 def _valid_item(item_id=100, created_date="2025-01-20 12:30:00"):

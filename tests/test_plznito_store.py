@@ -151,7 +151,7 @@ def test_store_reloads_when_file_changes(db_path: pathlib.Path) -> None:
     os.utime(db_path, (mtime, mtime))
 
     assert store.get_issues()[0]['id'] == 6
-    assert store.updated_at == datetime.datetime.fromtimestamp(mtime, tz=datetime.timezone.utc)
+    assert store.updated_at == datetime.datetime.fromtimestamp(mtime, tz=datetime.UTC)
 
 
 # ── filter_issues ────────────────────────────────────────────────────────────

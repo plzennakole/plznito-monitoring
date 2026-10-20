@@ -1,15 +1,16 @@
-import requests
-import os
-import json
-import tqdm
-import simplejson.errors
-import logging
 import argparse
+import json
+import logging
+import os
 import re
+
 import json5
+import requests
+import simplejson.errors
+import tqdm
 from requests.exceptions import RequestException
 
-from cyklo_filter import filter_cyklo_items
+from plznito_monitoring.cyklo_filter import filter_cyklo_items
 
 logger = logging.getLogger(__name__)
 

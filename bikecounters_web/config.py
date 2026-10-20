@@ -2,6 +2,7 @@
 config.py — Location definitions for Plzeň cycling counters
 """
 from pathlib import Path
+from typing import Any
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 BASE_DIR   = Path(__file__).parent
@@ -42,7 +43,7 @@ PALETTE = [
 #   cam_id      – numeric camera ID for the API URL
 #   collectors  – [{"collector_id", "source_id", "label", "color"}, ...]
 
-LOCATIONS = [
+LOCATIONS: list[dict[str, Any]] = [
     # ── Eco-counter ──────────────────────────────────────────────────────────
     {
         "id": "eco_prazdroj",
@@ -221,7 +222,7 @@ GROUPS = {
 LOCATION_BY_ID   = {loc["id"]: loc for loc in LOCATIONS}
 
 # source_id → (location_id, collector dict)
-SOURCE_MAP = {}
+SOURCE_MAP: dict[str, tuple[str, dict[str, Any]]] = {}
 for loc in LOCATIONS:
     for col in loc["collectors"]:
         SOURCE_MAP[col["source_id"]] = (loc["id"], col)

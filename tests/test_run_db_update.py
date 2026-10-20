@@ -4,16 +4,9 @@ import unittest
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-try:
-    import run_db_update as db_update
-except ModuleNotFoundError as import_error:
-    db_update = None
-    IMPORT_ERROR = import_error
-else:
-    IMPORT_ERROR = None
+from plznito_monitoring import run_db_update as db_update
 
 
-@unittest.skipIf(db_update is None, f"run_db_update import failed: {IMPORT_ERROR}")
 class RunDbUpdateTests(unittest.TestCase):
     def test_filter_data_handles_keywords_and_nulls(self):
         payload = {

@@ -8,9 +8,9 @@
     And then head to http://127.0.0.1:5000/ in your browser to see the map displayed
 """
 
-import os
 import argparse
 import json
+import os
 
 from app import app
 
@@ -30,7 +30,7 @@ if __name__ == '__main__':
         if args.configs:
             for fn in args.configs:
                 if not os.path.exists(fn):
-                    raise Exception('Config file %s not found' % fn)
+                    raise Exception(f'Config file {fn} not found')
                 config_fns.append(fn)
 
         for config_fn in config_fns:
@@ -49,10 +49,10 @@ if __name__ == '__main__':
                     threaded=True)  # , processes=app.config['app']['flask']['processes']
 
         elif app.config['app']['httpserver'] == 'tornado':
-            from tornado.wsgi import WSGIContainer
             from tornado.httpserver import HTTPServer
             from tornado.ioloop import IOLoop
             from tornado.log import enable_pretty_logging
+            from tornado.wsgi import WSGIContainer
 
             enable_pretty_logging()
             http_server = HTTPServer(WSGIContainer(app))
@@ -64,4 +64,4 @@ if __name__ == '__main__':
             http_server = WSGIServer(('', app.config['app']['port']), app)
             http_server.serve_forever()
         else:
-            raise Exception('Wrong httpserver: %s' % app.config['app']['httpserver'])
+            raise Exception(f"Wrong httpserver: {app.config['app']['httpserver']}")

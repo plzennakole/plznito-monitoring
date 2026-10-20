@@ -1,0 +1,6 @@
+-r requirements.txt
+mypy==2.4.0
+pytest==9.0.1
+pytest-mock==3.17.0
+ruff==0.17.1
+types-requests==2.33.0.20261006
