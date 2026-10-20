@@ -102,8 +102,8 @@ class RunMapRenderTests(unittest.TestCase):
         category_options = {entry["key"]: entry["label"] for entry in payload["category_options"]}
         self.assertEqual(status_options["2"], "V řešení")
         self.assertEqual(status_options["3"], "Vyřešeno")
-        self.assertEqual(category_options["id:3"], "Kategorie 3")
-        self.assertEqual(category_options["id:7"], "Kategorie 7")
+        self.assertEqual(category_options["id:3"], "Silnice, cyklostezky")
+        self.assertEqual(category_options["id:7"], "Dopravní značení")
 
         self.assertEqual(len(payload["skipped"]), 3)
         reasons = {entry["reason"] for entry in payload["skipped"]}
@@ -130,9 +130,9 @@ class RunMapRenderTests(unittest.TestCase):
         )
         self.assertEqual(marker["status_label"], "Vyřešeno")
         self.assertEqual(marker["category_key"], "id:3")
-        self.assertEqual(marker["category_label"], "Kategorie 3")
+        self.assertEqual(marker["category_label"], "Silnice, cyklostezky")
 
-    def test_serialize_map_data_category_name_fallback(self):
+    def test_serialize_map_data_official_category_name_maps_to_id(self):
         record = _valid_item()
         record.pop("category_id")
         record["category"] = "Silnice, cyklostezky"
@@ -144,9 +144,9 @@ class RunMapRenderTests(unittest.TestCase):
         )
 
         marker = payload["markers"][0]
-        self.assertEqual(marker["category_key"], "name:Silnice, cyklostezky")
+        self.assertEqual(marker["category_key"], "id:3")
         self.assertEqual(marker["category_label"], "Silnice, cyklostezky")
-        self.assertEqual(payload["category_options"][0]["key"], "name:Silnice, cyklostezky")
+        self.assertEqual(payload["category_options"][0]["key"], "id:3")
 
     def test_get_map_compact_excludes_full_text_and_reports_skipped(self):
         valid = _valid_item()
@@ -264,3 +264,69 @@ def test_api_popup_mode_embeds_no_details_and_points_to_api():
 def test_unknown_popup_mode_is_rejected():
     with pytest.raises(ValueError):
         map_render.serialize_map_data([], popup_mode="huge")
+
+
+def _scraped(item_id, date_text, category="Silnice, cyklostezky"):
+    return {
+        "id": item_id,
+        "name": "x",
+        "status_id": 3,
+        "latitude": "49.7",
+        "longitude": "13.3",
+        "category": category,
+        "date": date_text,
+    }
+
+
+@pytest.mark.parametrize(
+    "items, expected",
+    [
+        # A ticket closed late gets the earlier date of a newer ticket.
+        ([_scraped(1, "20.03.2026"), _scraped(2, "02.01.2026")], {1: datetime(2026, 1, 2), 2: datetime(2026, 1, 2)}),
+        # Its own date when no newer ticket is earlier.
+        ([_scraped(1, "05.01.2026"), _scraped(2, "07.01.2026")], {1: datetime(2026, 1, 5), 2: datetime(2026, 1, 7)}),
+        # Real API creation dates are used as bounds but never estimated.
+        (
+            [_scraped(1, "20.03.2026"), {**_valid_item(item_id=2), "created": {"date": "2026-01-03 08:00:00"}}],
+            {1: datetime(2026, 1, 3, 8, 0)},
+        ),
+        # Unsorted input and junk records.
+        (
+            [_scraped(2, "02.01.2026"), "junk", {"id": None}, _scraped(1, "20.03.2026")],
+            {1: datetime(2026, 1, 2), 2: datetime(2026, 1, 2)},
+        ),
+    ],
+)
+def test_estimate_creation_dates(items, expected):
+    assert map_render.estimate_creation_dates(items) == expected
+
+
+def test_estimate_creation_dates_window_limits_an_outlier():
+    # A mistyped old date only affects the CREATION_WINDOW tickets before it.
+    window = map_render.CREATION_WINDOW
+    items = [_scraped(i, "01.03.2026") for i in range(1, 2 * window + 1)]
+    items.append(_scraped(2 * window + 1, "01.01.2020"))
+    estimates = map_render.estimate_creation_dates(items)
+    assert estimates[window] == datetime(2026, 3, 1)
+    assert estimates[window + 1] == datetime(2020, 1, 1)
+
+
+def test_recently_closed_old_ticket_is_not_in_last_30_days():
+    # Ticket 1 was created in January and closed on 20 March: its scraped date is the close date.
+    items = [_scraped(1, "20.03.2026"), _scraped(2, "05.01.2026"), _scraped(3, "21.03.2026")]
+    payload = map_render.serialize_map_data(items, now=datetime(2026, 3, 25, 12, 0))
+    layers = {marker["id"]: marker["layer"] for marker in payload["markers"]}
+    assert layers == {"1": "2026", "2": "2026", "3": "recent"}
+    assert payload["markers"][0]["date_text"] == "≈ 05.01.2026"
+
+
+def test_categories_of_both_record_shapes_are_merged():
+    api_record = {**_valid_item(item_id=1), "category_id": 3}
+    payload = map_render.serialize_map_data(
+        [api_record, _scraped(2, "05.01.2026"), _scraped(3, "05.01.2026", category="Něco nového")],
+        now=datetime(2026, 3, 25, 12, 0),
+    )
+    assert [(o["key"], o["label"]) for o in payload["category_options"]] == [
+        ("id:3", "Silnice, cyklostezky"),
+        ("name:Něco nového", "Něco nového"),
+    ]

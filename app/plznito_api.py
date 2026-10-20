@@ -75,6 +75,12 @@ class IssueSchema(Schema):
     category_id = fields.Integer(allow_none=True)
     category_label = fields.String()
     created = fields.DateTime(metadata={'description': "Creation time with Europe/Prague offset."})
+    created_is_estimate = fields.Boolean(
+        metadata={
+            'description': "True when plznito.cz gave no creation date and `created` is estimated "
+            "from neighbouring tickets (usually within 1-4 days)."
+        }
+    )
     latitude = fields.Float()
     longitude = fields.Float()
     address = fields.String(allow_none=True)

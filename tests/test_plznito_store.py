@@ -77,8 +77,9 @@ def test_to_api_issue_api_shape() -> None:
         'status_id': 3,
         'status_label': "Vyřešeno",
         'category_id': 4,
-        'category_label': "Kategorie 4",
+        'category_label': "Odpadky, černé skládky, úklidy",
         'created': datetime.datetime(2025, 1, 10, 10, 0, tzinfo=plznito_store.PLZNITO_TZ),
+        'created_is_estimate': False,
         'latitude': 49.74,
         'longitude': 13.37,
         'address': "Americká 1",
@@ -183,3 +184,11 @@ def test_store_reloads_when_file_changes(db_path: pathlib.Path) -> None:
 def test_filter_issues(db_path: pathlib.Path, filters: dict, expected_ids: list[int]) -> None:
     issues = IssueStore(db_path).get_issues()
     assert [issue['id'] for issue in filter_issues(issues, **filters)] == expected_ids
+
+
+def test_store_estimates_creation_of_scraped_records(db_path: pathlib.Path) -> None:
+    issues = {issue['id']: issue for issue in IssueStore(db_path).get_issues()}
+    # Scraped ticket 3 (15.03.2026) is followed by ticket 5 created 2026-03-15 10:00.
+    assert issues[3]['created_is_estimate'] is True
+    assert issues[3]['created'].date() == datetime.date(2026, 3, 15)
+    assert issues[5]['created_is_estimate'] is False
