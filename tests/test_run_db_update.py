@@ -175,7 +175,10 @@ class RunDbUpdateTests(unittest.TestCase):
                 11: {"item": {"id": 11, "name": "eleven"}},
             }.get(ticket_id, {})
 
-        with patch.object(db_update, "download_one_id", side_effect=fake_download):
+        with (
+            patch.object(db_update, "download_one_id", side_effect=fake_download),
+            patch.object(db_update, "scrape_map_page", return_value=[]),
+        ):
             payload = db_update.get_plznito_current_data(
                 existing_records,
                 id_window_back=2,
@@ -183,7 +186,7 @@ class RunDbUpdateTests(unittest.TestCase):
             )
 
         self.assertEqual([item["id"] for item in payload["items"]], [8, 11])
-        self.assertEqual([ticket_id for ticket_id, _ in calls], [8, 9, 10, 11])
+        self.assertEqual(sorted(ticket_id for ticket_id, _ in calls), [8, 9, 10, 11])
         self.assertTrue(all(source == "web" for _, source in calls))
 
     def test_get_plznito_current_data_stops_after_10_consecutive_failures(self):
@@ -194,7 +197,10 @@ class RunDbUpdateTests(unittest.TestCase):
             calls.append((ticket_id, source))
             return {}
 
-        with patch.object(db_update, "download_one_id", side_effect=fake_download):
+        with (
+            patch.object(db_update, "download_one_id", side_effect=fake_download),
+            patch.object(db_update, "scrape_map_page", return_value=[]),
+        ):
             payload = db_update.get_plznito_current_data(
                 existing_records,
                 id_window_back=0,
@@ -204,7 +210,7 @@ class RunDbUpdateTests(unittest.TestCase):
         self.assertEqual(payload["items"], [])
         self.assertEqual(len(calls), db_update.MAX_CONSECUTIVE_SCRAPE_FAILURES)
         self.assertEqual(
-            [ticket_id for ticket_id, _ in calls],
+            sorted(ticket_id for ticket_id, _ in calls),
             list(range(50, 50 + db_update.MAX_CONSECUTIVE_SCRAPE_FAILURES)),
         )
 
@@ -218,7 +224,10 @@ class RunDbUpdateTests(unittest.TestCase):
                 return {"item": {"id": 29, "name": "ok"}}
             return {}
 
-        with patch.object(db_update, "download_one_id", side_effect=fake_download):
+        with (
+            patch.object(db_update, "download_one_id", side_effect=fake_download),
+            patch.object(db_update, "scrape_map_page", return_value=[]),
+        ):
             payload = db_update.get_plznito_current_data(
                 existing_records,
                 id_window_back=0,
@@ -226,8 +235,33 @@ class RunDbUpdateTests(unittest.TestCase):
             )
 
         self.assertEqual([item["id"] for item in payload["items"]], [29])
-        self.assertEqual([ticket_id for ticket_id, _ in calls][-1], 39)
+        self.assertEqual(max(ticket_id for ticket_id, _ in calls), 39)
         self.assertEqual(len(calls), 20)
+
+    def test_get_plznito_current_data_reuses_anchor_page(self):
+        calls = []
+
+        def fake_download(ticket_id, source="auto"):
+            calls.append(ticket_id)
+            return {"item": {"id": ticket_id, "name": "fetched"}} if ticket_id == 103 else {}
+
+        anchor_page = [
+            {"id": 101, "name": "from page"},
+            {"id": 102, "name": "from page"},
+            {"id": 105, "name": "from page"},
+            {"id": 999, "name": "outside crawl range"},
+        ]
+        with (
+            patch.object(db_update, "download_one_id", side_effect=fake_download),
+            patch.object(db_update, "scrape_map_page", return_value=anchor_page) as mock_page,
+        ):
+            payload = db_update.get_plznito_current_data([{"id": 102}], id_window_back=1, id_lookahead=5)
+
+        mock_page.assert_called_once_with(102)
+        self.assertEqual([item["id"] for item in payload["items"]], [101, 102, 103, 105])
+        self.assertEqual(payload["items"][0]["name"], "from page")
+        # Only ids missing from the anchor page are downloaded; 999 is outside 101..107.
+        self.assertEqual(sorted(calls), [103, 104, 106, 107])
 
     def test_db_update_writes_all_and_derives_cyklo_without_second_scrape(self):
         with TemporaryDirectory() as tmp_dir:

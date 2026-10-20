@@ -70,12 +70,12 @@ python -m plznito_monitoring.run_db_update --restore
 python -m plznito_monitoring.run_map_render --file_in plznito_monitoring/plznito_cyklo.json \
     --file_out plznito_monitoring/templates/plznito_map.html
 
-python -m plznito_monitoring.run_map_render --cluster_style --popup_mode full \
+python -m plznito_monitoring.run_map_render --cluster_style --popup_mode api \
     --file_in plznito_monitoring/plznito_all.json \
     --file_out plznito_monitoring/templates/plznito_map_all.html
 ```
 
-`--popup_mode compact` (default) produces smaller output; `full` includes the complete ticket text.
+`--popup_mode compact` (default) shows name, date and status; `full` embeds the complete ticket text and photo in the page; `api` (used for the all-tickets map) loads text and photo from `/plznito/api/issues/<id>` when a popup opens, which keeps the page about 2.5x smaller.
 
 **Full pipeline (download + render):**
 ```shell

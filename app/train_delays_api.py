@@ -2,6 +2,7 @@
 """Train delays endpoint (scraped from Babitron, cached)."""
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 from flask import Blueprint, Response, jsonify, request
 
@@ -26,6 +27,9 @@ def get_delays() -> Response | tuple[str, int]:
     """Train delays JSON (cached)."""
     if request.method == 'OPTIONS':
         return '', 204
-    delays_r = scrape_babitron_delays(TRAIN_DELAYS_SOURCE_R_URL)
-    delays_os = scrape_babitron_delays(TRAIN_DELAYS_SOURCE_OS_URL)
+    # Both pages in parallel; the OS page wins on duplicate trains.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        delays_r, delays_os = executor.map(
+            scrape_babitron_delays, [TRAIN_DELAYS_SOURCE_R_URL, TRAIN_DELAYS_SOURCE_OS_URL]
+        )
     return jsonify({**delays_r, **delays_os})

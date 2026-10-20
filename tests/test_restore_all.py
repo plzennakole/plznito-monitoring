@@ -84,7 +84,7 @@ def test_scrape_one_id_from_map(
     response: MagicMock,
     expected_id: int | None,
 ) -> None:
-    mock_get = mocker.patch.object(restore_all.requests, 'get', return_value=response)
+    mock_get = mocker.patch.object(restore_all.SESSION, 'get', return_value=response)
 
     result = restore_all.scrape_one_id_from_map(ticket_id)
 
@@ -93,7 +93,7 @@ def test_scrape_one_id_from_map(
 
 
 def test_scrape_one_id_from_map_network_error(mocker: MockerFixture) -> None:
-    mocker.patch.object(restore_all.requests, 'get', side_effect=requests.ConnectionError("down"))
+    mocker.patch.object(restore_all.SESSION, 'get', side_effect=requests.ConnectionError("down"))
     assert restore_all.scrape_one_id_from_map(100) == {}
 
 
@@ -115,7 +115,7 @@ def test_download_one_id_sources(
     expected: dict,
     expect_scrape: bool,
 ) -> None:
-    mock_get = mocker.patch.object(restore_all.requests, 'get', return_value=api_response)
+    mock_get = mocker.patch.object(restore_all.SESSION, 'get', return_value=api_response)
     mock_scrape = mocker.patch.object(restore_all, 'scrape_one_id_from_map', return_value={'item': {'id': 9}})
 
     assert restore_all.download_one_id(1, source=source) == expected
@@ -126,7 +126,7 @@ def test_download_one_id_sources(
 def test_download_one_id_invalid_api_json_falls_back(mocker: MockerFixture) -> None:
     response = _response()
     response.json.side_effect = json.JSONDecodeError("bad", "", 0)
-    mocker.patch.object(restore_all.requests, 'get', return_value=response)
+    mocker.patch.object(restore_all.SESSION, 'get', return_value=response)
     mocker.patch.object(restore_all, 'scrape_one_id_from_map', return_value={'item': {'id': 9}})
 
     assert restore_all.download_one_id(1) == {'item': {'id': 9}}
@@ -142,3 +142,14 @@ def test_download_range_skips_existing_and_failed(mocker: MockerFixture, tmp_pat
     assert [call.args[0] for call in mock_download.call_args_list] == [2, 3]
     assert sorted(p.name for p in tmp_path.iterdir()) == ['1.json', '2.json']
     assert json.loads((tmp_path / '2.json').read_text(encoding='utf-8')) == {'item': {'id': 2}}
+
+
+def test_scrape_map_page_returns_all_listed_tickets(mocker: MockerFixture) -> None:
+    mocker.patch.object(restore_all.SESSION, 'get', return_value=_response(MAP_PAGE))
+    assert [item['id'] for item in restore_all.scrape_map_page(100)] == [100, 101]
+
+
+@pytest.mark.parametrize('response', [_response(status=503), _response("var locations = [{id: }];")])
+def test_scrape_map_page_failure(mocker: MockerFixture, response: MagicMock) -> None:
+    mocker.patch.object(restore_all.SESSION, 'get', return_value=response)
+    assert restore_all.scrape_map_page(100) == []

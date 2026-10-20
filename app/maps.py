@@ -42,6 +42,6 @@ def map_all() -> str | tuple[str, int]:
     return _render_map_page(
         'plznito_full_map_index.html',
         'plznito_map_all.html',
-        '--cluster_style --popup_mode full --file_in plznito_monitoring/plznito_all.json'
+        '--cluster_style --popup_mode api --file_in plznito_monitoring/plznito_all.json'
         ' --file_out plznito_monitoring/templates/plznito_map_all.html',
     )

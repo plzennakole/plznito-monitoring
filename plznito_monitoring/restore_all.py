@@ -16,13 +16,41 @@ from typing import Any
 import json5
 import requests
 import tqdm
+from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
+from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
 API_DETAIL_URL = "https://www.plznito.cz/api/1.0/tickets/detail/{ticket_id}"
 MAP_URL = "https://www.plznito.cz/map/{ticket_id}"
 REQUEST_TIMEOUT_SECONDS = 20
+USER_AGENT = "plznito-monitoring/1.0 (+https://github.com/plzennakole/plznito-monitoring)"
+
+
+def _make_session() -> requests.Session:
+    """
+    HTTP session reusing connections, retrying transient errors with backoff (1 s, 2 s, 4 s).
+
+    :return: Configured session.
+    """
+    session = requests.Session()
+    retry = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=['GET'],
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry, pool_maxsize=10)
+    session.mount('https://', adapter)
+    session.mount('http://', adapter)
+    session.headers['User-Agent'] = USER_AGENT
+    return session
+
+
+# Shared by all downloads; requests sessions are safe for concurrent GETs.
+SESSION = _make_session()
 
 
 def download_one_id(ticket_id: int, source: str = "auto") -> dict[str, Any]:
@@ -35,7 +63,7 @@ def download_one_id(ticket_id: int, source: str = "auto") -> dict[str, Any]:
     """
     if source in ("auto", "api"):
         try:
-            r = requests.get(API_DETAIL_URL.format(ticket_id=ticket_id), timeout=REQUEST_TIMEOUT_SECONDS)
+            r = SESSION.get(API_DETAIL_URL.format(ticket_id=ticket_id), timeout=REQUEST_TIMEOUT_SECONDS)
             r.raise_for_status()
             out: dict[str, Any] = r.json()
             if out:
@@ -47,6 +75,30 @@ def download_one_id(ticket_id: int, source: str = "auto") -> dict[str, Any]:
     return scrape_one_id_from_map(ticket_id)
 
 
+def scrape_map_page(ticket_id: int) -> list[dict[str, Any]]:
+    """
+    Scrape all tickets listed on the web map page of a ticket.
+
+    A page lists the requested ticket plus the ~100 most recent tickets.
+
+    :param ticket_id: Plznito ticket id.
+    :return: Ticket records, empty if the page failed to load or parse.
+    """
+    try:
+        r = SESSION.get(MAP_URL.format(ticket_id=ticket_id), timeout=REQUEST_TIMEOUT_SECONDS)
+        r.raise_for_status()
+    except RequestException as e:
+        logger.warning("Map fetch failed for id %s: %s", ticket_id, e)
+        return []
+
+    try:
+        locations = _parse_locations_from_html(r.text)
+    except ValueError as e:
+        logger.warning("Failed to parse locations for id %s: %s", ticket_id, e)
+        return []
+    return [_location_to_item(location) for location in locations]
+
+
 def scrape_one_id_from_map(ticket_id: int) -> dict[str, Any]:
     """
     Scrape one ticket from its web map page.
@@ -54,22 +106,9 @@ def scrape_one_id_from_map(ticket_id: int) -> dict[str, Any]:
     :param ticket_id: Plznito ticket id.
     :return: ``{"item": {...}}``, or ``{}`` if the page failed to load or does not contain the ticket.
     """
-    try:
-        r = requests.get(MAP_URL.format(ticket_id=ticket_id), timeout=REQUEST_TIMEOUT_SECONDS)
-        r.raise_for_status()
-    except RequestException as e:
-        logger.warning("Map fetch failed for id %s: %s", ticket_id, e)
-        return {}
-
-    try:
-        locations = _parse_locations_from_html(r.text)
-    except ValueError as e:
-        logger.warning("Failed to parse locations for id %s: %s", ticket_id, e)
-        return {}
-
-    for location in locations:
-        if str(location.get("id")) == str(ticket_id):
-            return {"item": _location_to_item(location)}
+    for item in scrape_map_page(ticket_id):
+        if str(item.get("id")) == str(ticket_id):
+            return {"item": item}
 
     logger.warning("No matching item for id %s in map page", ticket_id)
     return {}

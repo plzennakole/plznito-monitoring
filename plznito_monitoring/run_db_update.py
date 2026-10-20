@@ -6,13 +6,15 @@ import bz2
 import json
 import logging
 import os
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from plznito_monitoring.common import atomic_write_json, load_json, parse_int
 from plznito_monitoring.cyklo_filter import filter_cyklo_items
-from plznito_monitoring.restore_all import download_one_id
+from plznito_monitoring.restore_all import download_one_id, scrape_map_page
 
 logger = logging.getLogger(__name__)
 # Defaults live next to this file, so the scripts work from any working directory.
@@ -24,6 +26,9 @@ SEED_DATA_DIR_DEFAULT = str(PLZNITO_DIR / "data")
 LOG_FILE_DEFAULT = str(PLZNITO_DIR / "plznito_monitoring.log")
 SNAPSHOT_DIR_DEFAULT = str(PLZNITO_DIR / "notebooks")
 MAX_CONSECUTIVE_SCRAPE_FAILURES = 10
+# Ids are fetched in ordered chunks, so a crawl stop wastes at most one chunk of requests.
+SCRAPE_CHUNK_SIZE = 10
+SCRAPE_WORKERS = 5
 
 Record = dict[str, Any]
 
@@ -193,6 +198,30 @@ def _extract_item(scraper_output: Any) -> Record | None:
     return item
 
 
+def _scrape_in_chunks(start_id: int, end_id: int, known: dict[int, Record]) -> Iterator[tuple[int, Any]]:
+    """
+    Scrape ids ``start_id..end_id`` in parallel, yielding results in id order.
+
+    Ids in ``known`` are not downloaded again. Ids are submitted one chunk at a time, so
+    stopping the iteration stops further requests.
+
+    :param start_id: First ticket id.
+    :param end_id: Last ticket id (inclusive).
+    :param known: Already scraped records by id.
+    :return: Iterator of ``(ticket id, scraper output)``.
+    """
+
+    def scrape(ticket_id: int) -> Any:
+        if ticket_id in known:
+            return {"item": known[ticket_id]}
+        return download_one_id(ticket_id, source="web")
+
+    with ThreadPoolExecutor(max_workers=SCRAPE_WORKERS) as executor:
+        for chunk_start in range(start_id, end_id + 1, SCRAPE_CHUNK_SIZE):
+            chunk = range(chunk_start, min(chunk_start + SCRAPE_CHUNK_SIZE, end_id + 1))
+            yield from zip(chunk, executor.map(scrape, chunk), strict=True)
+
+
 def get_plznito_current_data(
     existing_records: list[Any],
     anchor_id: int | None = None,
@@ -223,13 +252,21 @@ def get_plznito_current_data(
         id_lookahead=id_lookahead,
     )
 
+    # Every map page also lists the ~100 most recent tickets: one request usually covers most of the window.
+    known = {
+        record_id: record
+        for record_id, record in _collect_valid_records(scrape_map_page(resolved_anchor), "anchor map page")
+        if start_id <= record_id <= end_id
+    }
+    logger.info("Anchor map page covers %d ids of the crawl range.", len(known))
+
     items = []
     empty_items = 0
     consecutive_failures = 0
     scanned_count = 0
-    for ticket_id in range(start_id, end_id + 1):
+    for ticket_id, scraped_data in _scrape_in_chunks(start_id, end_id, known):
         scanned_count += 1
-        item = _extract_item(download_one_id(ticket_id, source="web"))
+        item = _extract_item(scraped_data)
         if item is None:
             empty_items += 1
             consecutive_failures += 1

@@ -132,7 +132,8 @@ def scrape_babitron_delays(url: str) -> dict[str, dict[str, Any]]:
     results: dict[str, dict[str, Any]] = {}
     source_page = source_page_from_url(url)
 
-    response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
+    # Fail fast when the server is unreachable (5 s), allow a slow page (15 s).
+    response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=(5, 15))
     if response.status_code != 200:
         raise TrainDelaysScrapeError(f"Chyba při stahování stránky: {response.status_code}")
 
