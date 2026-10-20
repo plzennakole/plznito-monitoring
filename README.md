@@ -67,7 +67,7 @@ python -m plznito_monitoring.run_db_update --restore
 
 **Render maps:**
 ```shell
-python -m plznito_monitoring.run_map_render --file_in plznito_monitoring/plznito_cyklo.json \
+python -m plznito_monitoring.run_map_render --popup_mode api --file_in plznito_monitoring/plznito_cyklo.json \
     --file_out plznito_monitoring/templates/plznito_map.html
 
 python -m plznito_monitoring.run_map_render --cluster_style --popup_mode api \
@@ -75,7 +75,9 @@ python -m plznito_monitoring.run_map_render --cluster_style --popup_mode api \
     --file_out plznito_monitoring/templates/plznito_map_all.html
 ```
 
-`--popup_mode compact` (default) shows name, date and status; `full` embeds the complete ticket text and photo in the page; `api` (used for the all-tickets map) loads text and photo from `/plznito/api/issues/<id>` when a popup opens, which keeps the page about 2.5x smaller.
+`--popup_mode compact` (default) shows name, date and status; `full` embeds the complete ticket text and photo in the page; `api` (used by both maps) loads text and photo from `/plznito/api/issues/<id>` when a popup opens, which keeps the page about 2.5x smaller.
+
+The page layout lives in `plznito_monitoring/map_template.html` (plain HTML/CSS/JS; `run_map_render` only fills in the data). Filters and an open ticket are kept in the URL hash, e.g. `/plznito/map-all#t=365d&s=1,2&id=49965`, so a view can be shared. Add `?embed=1` to hide the page header when embedding a map in an iframe.
 
 **Full pipeline (download + render):**
 ```shell

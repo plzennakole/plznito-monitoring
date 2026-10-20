@@ -1,6 +1,4 @@
-{% extends "layout.html" %}
-{% block title %} Přehled všech hlášení plzni.to {% endblock %}
-{% block head %} {{ super() }} {% endblock %}
-{% block body %}
-    {% include "plznito_map_all.html" %}
-{% endblock %}
+{% extends "map_page.html" %}
+{% block title %}Přehled všech hlášení plzni.to{% endblock %}
+{% block map_title %}všechna hlášení{% endblock %}
+{% block map %}{% include "plznito_map_all.html" %}{% endblock %}

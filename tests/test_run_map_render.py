@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tempfile
 import unittest
 from datetime import datetime
@@ -7,6 +8,13 @@ from datetime import datetime
 import pytest
 
 from plznito_monitoring import run_map_render as map_render
+
+
+def _map_config(html_output):
+    """Parse the CONFIG object the renderer embeds in the page script."""
+    match = re.search(r"const CONFIG = (.*?);\n", html_output)
+    assert match, "CONFIG not found in map HTML"
+    return json.loads(match.group(1))
 
 
 def _valid_item(item_id=100, created_date="2025-01-20 12:30:00"):
@@ -160,15 +168,23 @@ class RunMapRenderTests(unittest.TestCase):
         self.assertNotIn("plznito-data-quality", html_output)
         self.assertNotIn("Data quality", html_output)
         self.assertIn('"layer":"2025"', html_output)
-        self.assertIn("const statusOptions =", html_output)
-        self.assertIn("const categoryOptions =", html_output)
         self.assertNotIn("VERY_LONG_DESCRIPTION_SHOULD_NOT_BE_EMBEDDED", html_output)
-        self.assertIn('id="plznito-filter-time"', html_output)
-        self.assertIn('id="plznito-filter-reset"', html_output)
+        for element_id in (
+            "plznito-filter-period",
+            "plznito-filter-status",
+            "plznito-filter-category",
+            "plznito-filter-reset",
+            "plznito-empty",
+        ):
+            self.assertIn(f'id="{element_id}"', html_output)
         self.assertIn("last_7_days", html_output)
         self.assertIn("function applyFilters()", html_output)
-        self.assertIn("plznito-filter-status-", html_output)
-        self.assertIn("plznito-filter-category-", html_output)
+
+        config = _map_config(html_output)
+        self.assertTrue(config["useCluster"])
+        self.assertEqual(len(config["markers"]), 1)
+        self.assertEqual([option["key"] for option in config["statusOptions"]], ["3"])
+        self.assertEqual(set(config["statusColors"]), {"1", "2", "3", "4", "5", "6"})
 
         log_output = "\n".join(captured.output)
         self.assertIn("Map processing summary:", log_output)
@@ -205,8 +221,10 @@ class RunMapRenderTests(unittest.TestCase):
             self.assertNotIn("Data quality", html_output)
             self.assertEqual(html_output.count('"ticket_url"'), 2)
             self.assertNotIn("Detailed Description", html_output)
-            self.assertIn('id="plznito-filter-time"', html_output)
+            self.assertIn('id="plznito-filter-period"', html_output)
             self.assertIn("function resetFilters()", html_output)
+            self.assertNotIn("__MAP_CONFIG__", html_output)
+            self.assertFalse(_map_config(html_output)["useCluster"])
 
     def test_invalid_popup_mode_raises(self):
         with self.assertRaises(ValueError):
@@ -257,8 +275,9 @@ def test_api_popup_mode_embeds_no_details_and_points_to_api():
     assert "description" not in marker and "photo_url" not in marker
 
     html_output = map_render.get_map([item], cluster=True, popup_mode="api")
-    assert 'const detailsApiPath = "/plznito/api/issues/";' in html_output
-    assert 'const popupMode = "api";' in html_output
+    config = _map_config(html_output)
+    assert config["detailsApiPath"] == "/plznito/api/issues/"
+    assert config["popupMode"] == "api"
 
 
 def test_unknown_popup_mode_is_rejected():
@@ -330,3 +349,21 @@ def test_categories_of_both_record_shapes_are_merged():
         ("id:3", "Silnice, cyklostezky"),
         ("name:Něco nového", "Něco nového"),
     ]
+
+
+@pytest.mark.parametrize(
+    "template_text", ["<script>no placeholder</script>", "/*__MAP_CONFIG__*/null /*__MAP_CONFIG__*/null"]
+)
+def test_map_template_needs_exactly_one_placeholder(tmp_path, monkeypatch, template_text):
+    template = tmp_path / "template.html"
+    template.write_text(template_text, encoding="utf-8")
+    monkeypatch.setattr(map_render, "MAP_TEMPLATE_PATH", str(template))
+    with pytest.raises(ValueError):
+        map_render.get_map([_valid_item()])
+
+
+def test_map_config_cannot_break_out_of_the_script():
+    item = {**_valid_item(), "name": "</script><script>alert(1)</script>"}
+    html_output = map_render.get_map([item])
+    assert "</script><script>alert(1)" not in html_output
+    assert _map_config(html_output)["markers"][0]["name"] == item["name"]
