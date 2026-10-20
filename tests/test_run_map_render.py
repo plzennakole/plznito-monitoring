@@ -248,3 +248,19 @@ def test_sanitize_photo_url(photos, expected):
 )
 def test_to_unix_timestamp_uses_prague_time(value, expected):
     assert map_render._to_unix_timestamp(value) == expected
+
+
+def test_api_popup_mode_embeds_no_details_and_points_to_api():
+    item = _valid_item()
+    payload = map_render.serialize_map_data([item], popup_mode="api", now=datetime(2025, 2, 1, 12, 0, 0))
+    marker = payload["markers"][0]
+    assert "description" not in marker and "photo_url" not in marker
+
+    html_output = map_render.get_map([item], cluster=True, popup_mode="api")
+    assert 'const detailsApiPath = "/plznito/api/issues/";' in html_output
+    assert 'const popupMode = "api";' in html_output
+
+
+def test_unknown_popup_mode_is_rejected():
+    with pytest.raises(ValueError):
+        map_render.serialize_map_data([], popup_mode="huge")

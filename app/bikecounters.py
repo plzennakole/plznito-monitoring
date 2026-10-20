@@ -7,7 +7,7 @@ import sqlite3
 from datetime import date, timedelta
 from typing import Any
 
-from flask import Blueprint, Response, abort, jsonify, request
+from flask import Blueprint, Response, abort, jsonify, request, send_file
 
 from app.cors import add_cors_headers
 from app.extensions import cache
@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 _DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 _MAX_DATE_RANGE_DAYS = env_int('BIKECOUNTERS_MAX_DATE_RANGE_DAYS', 730)
 _MAX_RESULT_ROWS = env_int('BIKECOUNTERS_MAX_RESULT_ROWS', 50_000)
+# Counter data is ingested once a day, so an hour of caching is safe.
+CACHE_TIMEOUT_SECONDS = 3600
 # SQL expression truncating ``ts`` to the bucket of each resolution.
 _RESOLUTION_TRUNC = {
     'hourly': 'substr(ts, 1, 13)',  # 'YYYY-MM-DD HH'
@@ -61,8 +63,8 @@ def _get_location(loc_id: str) -> dict[str, Any]:
 @bp.route('')
 def page() -> Response:
     """Cycling counters SPA."""
-    html_path = bw_cfg.BASE_DIR / 'templates' / 'index.html'
-    return Response(html_path.read_text(encoding='utf-8'), mimetype='text/html')
+    # send_file answers conditional requests (304) from the file's mtime.
+    return send_file(bw_cfg.BASE_DIR / 'templates' / 'index.html', mimetype='text/html')
 
 
 @bp.route('/api/nav')
@@ -272,6 +274,7 @@ def api_daily(loc_id: str) -> Response:
 
 
 @bp.route('/api/weather')
+@cache.cached(timeout=CACHE_TIMEOUT_SECONDS)
 def api_weather() -> Response:
     """Weather data as {date: {t, p}}."""
     rows = query('SELECT date, t, p FROM weather ORDER BY date')
@@ -325,6 +328,7 @@ def _yoy_ref_date() -> date:
 
 
 @bp.route('/api/yoy/<loc_id>')
+@cache.cached(timeout=CACHE_TIMEOUT_SECONDS)
 def api_yoy_location(loc_id: str) -> Response:
     """Year-over-year monthly avg/day + YTD, MTD for a location."""
     loc = _get_location(loc_id)
@@ -333,7 +337,7 @@ def api_yoy_location(loc_id: str) -> Response:
 
 
 @bp.route('/api/yoy')
-@cache.cached(timeout=3600)
+@cache.cached(timeout=CACHE_TIMEOUT_SECONDS)
 def api_yoy_all() -> Response:
     """Year-over-year summary (YTD, MTD) for all locations."""
     ref_date = _yoy_ref_date()

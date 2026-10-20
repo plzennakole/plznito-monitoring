@@ -11,4 +11,4 @@ DIR=plznito_monitoring
 
 # Render the data
 "$PYTHON" -m plznito_monitoring.run_map_render --file_in "$DIR/plznito_cyklo.json" --file_out "$DIR/templates/plznito_map.html"
-"$PYTHON" -m plznito_monitoring.run_map_render --popup_mode full --cluster_style --file_in "$DIR/plznito_all.json" --file_out "$DIR/templates/plznito_map_all.html"
+"$PYTHON" -m plznito_monitoring.run_map_render --popup_mode api --cluster_style --file_in "$DIR/plznito_all.json" --file_out "$DIR/templates/plznito_map_all.html"

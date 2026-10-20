@@ -1,5 +1,4 @@
 # Copyright 2026 Plzeň na kole Inc. All rights reserved.
-import json
 import pathlib
 
 import pytest
@@ -34,11 +33,11 @@ def test_status_label(status_id: int, expected: str) -> None:
 
 def test_atomic_write_json_roundtrip_and_replace(tmp_path: pathlib.Path) -> None:
     path = tmp_path / 'nested' / 'db.json'
-    common.atomic_write_json(str(path), [{'id': 1}])
-    common.atomic_write_json(str(path), [{'id': 2, 'name': "Díra"}], indent=None)
+    common.atomic_write_json(str(path), [{'id': 1}], indent=4)
+    common.atomic_write_json(str(path), [{'id': 2, 'name': "Díra"}])
 
     assert common.load_json(str(path)) == [{'id': 2, 'name': "Díra"}]
-    assert path.read_text(encoding='utf-8') == json.dumps([{'id': 2, 'name': "Díra"}])
+    assert path.read_text(encoding='utf-8') == '[{"id":2,"name":"Díra"}]'
     assert [p.name for p in path.parent.iterdir()] == ['db.json']
 
 

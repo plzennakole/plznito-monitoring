@@ -84,13 +84,14 @@ def atomic_open(path: str) -> Iterator[TextIO]:
         raise
 
 
-def atomic_write_json(path: str, data: Any, indent: int | None = 4) -> None:
+def atomic_write_json(path: str, data: Any, indent: int | None = None) -> None:
     """
-    Write JSON atomically, see :func:`atomic_open`.
+    Write UTF-8 JSON atomically, see :func:`atomic_open`.
 
     :param path: Target file path.
     :param data: JSON-serialisable value.
-    :param indent: Indentation passed to :func:`json.dump`; ``None`` for compact output.
+    :param indent: Indentation for human-readable output; ``None`` (default) writes compact JSON.
     """
+    separators = None if indent is not None else (',', ':')
     with atomic_open(path) as fw:
-        json.dump(data, fw, indent=indent)
+        json.dump(data, fw, indent=indent, separators=separators, ensure_ascii=False)

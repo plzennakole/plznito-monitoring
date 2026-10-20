@@ -191,10 +191,15 @@ def test_scrape_raises_on_http_error(mock_get: MagicMock) -> None:
 
 @patch('app.train_delays_api.scrape_babitron_delays')
 def test_endpoint_merges_both_sources(mock_scrape: MagicMock, client) -> None:
-    mock_scrape.side_effect = [
-        {'rj 55': {'source_page': 'zponline'}, 'Os 1': {'source_page': 'zponline'}},
-        {'Os 1': {'source_page': 'zponlineos'}},
-    ]
+    # The pages are fetched concurrently, so results are keyed by URL, not by call order.
+    pages = {
+        train_delays_api.TRAIN_DELAYS_SOURCE_R_URL: {
+            'rj 55': {'source_page': 'zponline'},
+            'Os 1': {'source_page': 'zponline'},
+        },
+        train_delays_api.TRAIN_DELAYS_SOURCE_OS_URL: {'Os 1': {'source_page': 'zponlineos'}},
+    }
+    mock_scrape.side_effect = pages.__getitem__
 
     response = client.get('/train_delays/')
 
@@ -205,8 +210,7 @@ def test_endpoint_merges_both_sources(mock_scrape: MagicMock, client) -> None:
         'rj 55': {'source_page': 'zponline'},
         'Os 1': {'source_page': 'zponlineos'},
     }
-    called_urls = [call.args[0] for call in mock_scrape.call_args_list]
-    assert called_urls == [train_delays_api.TRAIN_DELAYS_SOURCE_R_URL, train_delays_api.TRAIN_DELAYS_SOURCE_OS_URL]
+    assert sorted(call.args[0] for call in mock_scrape.call_args_list) == sorted(pages)
 
 
 @patch('app.train_delays_api.scrape_babitron_delays')

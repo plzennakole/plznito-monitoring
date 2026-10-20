@@ -25,6 +25,10 @@ DATE_FORMATS = (
 DEFAULT_CENTER = [49.7443392, 13.3766164]
 DEFAULT_ZOOM = 13
 DEFAULT_TIME_FILTER = "last_30_days"
+# "compact": name/date/status only; "full": also description, solution and photo embedded in the page;
+# "api": like compact, details are loaded from the Plznito API when a popup opens.
+POPUP_MODES = ("compact", "full", "api")
+DETAILS_API_PATH = "/plznito/api/issues/"
 STATUS_COLOR_MAP = {
     2: "orange",
     3: "green",
@@ -250,7 +254,7 @@ def _serialize_marker(item: Record, popup_mode: str) -> Record:
     Marker data for the page script.
 
     :param item: Normalised record.
-    :param popup_mode: ``"compact"`` or ``"full"`` (adds description, solution and photo).
+    :param popup_mode: One of :data:`POPUP_MODES`; ``"full"`` adds description, solution and photo.
     :return: Marker dict.
     """
     ticket_id = str(item["id"])
@@ -315,13 +319,13 @@ def serialize_map_data(
     Turn raw records into the data embedded in the map page.
 
     :param data_current: Raw records.
-    :param popup_mode: ``"compact"`` or ``"full"``.
+    :param popup_mode: One of :data:`POPUP_MODES`.
     :param now: Reference time for the "recent" layers (naive Prague time); defaults to now.
     :raises ValueError: For an unknown ``popup_mode``.
     :return: Markers, layers, filter options, skip report and stats.
     """
-    if popup_mode not in {"compact", "full"}:
-        raise ValueError("popup_mode must be 'compact' or 'full'.")
+    if popup_mode not in POPUP_MODES:
+        raise ValueError(f"popup_mode must be one of {POPUP_MODES}.")
 
     if now is None:
         # Naive Prague time, the same frame as the ticket dates it is compared with.
@@ -442,6 +446,7 @@ def _build_map_html(serialized_data: dict[str, Any], cluster: bool = False) -> s
     status_options_json = _json_for_inline_script(serialized_data["status_options"])
     category_options_json = _json_for_inline_script(serialized_data["category_options"])
     popup_mode_json = _json_for_inline_script(serialized_data["popup_mode"])
+    details_api_path_json = _json_for_inline_script(DETAILS_API_PATH)
     status_colors_json = _json_for_inline_script({str(key): value for key, value in STATUS_COLOR_MAP.items()})
     status_labels_json = _json_for_inline_script({str(key): value for key, value in STATUS_LABELS.items()})
     generated_ts_json = _json_for_inline_script(serialized_data["generated_ts"])
@@ -592,6 +597,7 @@ def _build_map_html(serialized_data: dict[str, Any], cluster: bool = False) -> s
   const categoryOptions = {category_options_json};
   const generatedTs = {generated_ts_json};
   const popupMode = {popup_mode_json};
+  const detailsApiPath = {details_api_path_json};
   const useCluster = {use_cluster};
   const defaultTimeFilter = "{DEFAULT_TIME_FILTER}";
 
@@ -628,7 +634,11 @@ def _build_map_html(serialized_data: dict[str, Any], cluster: bool = False) -> s
       escapeMultiline(marker.date_text) + "<br>" +
       escapeHtml(marker.status_label || labelForStatus(marker.status_id));
 
-    if (popupMode === "full") {{
+    if (popupMode === "api" && !marker.detailsLoaded) {{
+      popupHtml += "<br><i>" + escapeHtml(marker.detailsError || "Načítám podrobnosti…") + "</i>";
+    }}
+
+    if (popupMode === "full" || marker.detailsLoaded) {{
       popupHtml += "<br>" + escapeMultiline(marker.description || "");
 
       if ((marker.solution || "").trim()) {{
@@ -645,6 +655,30 @@ def _build_map_html(serialized_data: dict[str, Any], cluster: bool = False) -> s
     return popupHtml;
   }}
 
+  function loadDetails(marker, popup) {{
+    if (marker.detailsLoaded) {{
+      return;
+    }}
+    fetch(detailsApiPath + encodeURIComponent(marker.id))
+      .then(function (response) {{
+        if (!response.ok) {{
+          throw new Error("HTTP " + response.status);
+        }}
+        return response.json();
+      }})
+      .then(function (details) {{
+        marker.description = details.description;
+        marker.solution = details.solution;
+        marker.photo_url = details.photo_url;
+        marker.detailsLoaded = true;
+        popup.setContent(buildPopupContent(marker));
+      }})
+      .catch(function () {{
+        marker.detailsError = "Podrobnosti se nepodařilo načíst.";
+        popup.setContent(buildPopupContent(marker));
+      }});
+  }}
+
   if (!window.L) {{
     throw new Error("Leaflet library is not available.");
   }}
@@ -656,7 +690,7 @@ def _build_map_html(serialized_data: dict[str, Any], cluster: bool = False) -> s
     maxZoom: 18
   }}).addTo(map);
 
-  const displayLayer = useCluster ? L.markerClusterGroup() : L.layerGroup();
+  const displayLayer = useCluster ? L.markerClusterGroup({{ chunkedLoading: true }}) : L.layerGroup();
   displayLayer.addTo(map);
 
   const markerEntries = markers.map(function (marker) {{
@@ -667,7 +701,11 @@ def _build_map_html(serialized_data: dict[str, Any], cluster: bool = False) -> s
       markerColor: colorForStatus(marker.status_id)
     }});
     const markerObj = L.marker([marker.lat, marker.lon], {{ icon: markerIcon }});
-    markerObj.bindPopup(buildPopupContent(marker), {{ maxWidth: 300, minWidth: 300 }});
+    // Popup HTML is built on open, not for every marker up front.
+    markerObj.bindPopup(function () {{ return buildPopupContent(marker); }}, {{ maxWidth: 300, minWidth: 300 }});
+    if (popupMode === "api") {{
+      markerObj.on("popupopen", function (event) {{ loadDetails(marker, event.popup); }});
+    }}
     return {{ marker: marker, markerObj: markerObj }};
   }});
 
@@ -755,7 +793,7 @@ def _build_map_html(serialized_data: dict[str, Any], cluster: bool = False) -> s
     const selectedCategories = selectedKeys("input[id^='plznito-filter-category-']:checked", "data-category-key");
 
     displayLayer.clearLayers();
-    let shownCount = 0;
+    const shownMarkers = [];
 
     markerEntries.forEach(function (entry) {{
       const marker = entry.marker;
@@ -768,9 +806,15 @@ def _build_map_html(serialized_data: dict[str, Any], cluster: bool = False) -> s
       if (!selectedCategories.has(marker.category_key)) {{
         return;
       }}
-      entry.markerObj.addTo(displayLayer);
-      shownCount += 1;
+      shownMarkers.push(entry.markerObj);
     }});
+    // One bulk add lets the cluster group build its tree once instead of per marker.
+    if (displayLayer.addLayers) {{
+      displayLayer.addLayers(shownMarkers);
+    }} else {{
+      shownMarkers.forEach(function (markerObj) {{ displayLayer.addLayer(markerObj); }});
+    }}
+    const shownCount = shownMarkers.length;
 
     const counterElement = document.getElementById("plznito-filter-count");
     counterElement.textContent = "Zobrazeno: " + shownCount + " / " + markerEntries.length;
@@ -824,7 +868,7 @@ def get_map(data_current: list[Any], cluster: bool = False, popup_mode: str = "c
 
     :param data_current: Raw records.
     :param cluster: Cluster markers.
-    :param popup_mode: ``"compact"`` or ``"full"``.
+    :param popup_mode: One of :data:`POPUP_MODES`.
     :return: Page HTML.
     """
     serialized_data = serialize_map_data(data_current, popup_mode=popup_mode)
@@ -862,7 +906,7 @@ def render_map_to_file(
     :param file_in: JSON list of records, or ``{"items": [...]}``.
     :param file_out: Output HTML path.
     :param cluster: Cluster markers.
-    :param popup_mode: ``"compact"`` or ``"full"``.
+    :param popup_mode: One of :data:`POPUP_MODES`.
     :raises ValueError: If the input has another shape.
     """
     logger.info("Loading data from %s", file_in)
@@ -893,7 +937,7 @@ def main() -> None:
     parser.add_argument("--file_in", type=str, default=str(PLZNITO_DIR / "plznito_cyklo.json"))
     parser.add_argument("--file_out", type=str, default=str(PLZNITO_DIR / "templates" / "plznito_map.html"))
     parser.add_argument("--cluster_style", action="store_true")
-    parser.add_argument("--popup_mode", type=str, default="compact", choices=["compact", "full"])
+    parser.add_argument("--popup_mode", type=str, default="compact", choices=POPUP_MODES)
     args = parser.parse_args()
 
     log_level = getattr(logging, args.log_level.upper(), logging.INFO)

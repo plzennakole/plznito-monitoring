@@ -58,3 +58,19 @@ def test_daily_is_counts_with_daily_resolution(client: FlaskClient) -> None:
     assert daily.get_json() == counts.get_json()
     assert daily.get_json()['resolution'] == 'daily'
     assert mock_query.call_args_list[0] == mock_query.call_args_list[2]
+
+
+@pytest.mark.parametrize('path', ['/bikecounters/api/weather', '/bikecounters/api/yoy/eco_prazdroj'])
+def test_bikecounter_endpoints_are_cached(client: FlaskClient, path: str) -> None:
+    with patch.object(bikecounters, 'query', return_value=[]) as mock_query:
+        first = client.get(path)
+        calls_after_first = mock_query.call_count
+        second = client.get(path)
+    assert first.get_json() == second.get_json()
+    assert calls_after_first >= 1
+    assert mock_query.call_count == calls_after_first
+
+
+def test_bikecounters_page_supports_conditional_requests(client: FlaskClient) -> None:
+    last_modified = client.get('/bikecounters').headers['Last-Modified']
+    assert client.get('/bikecounters', headers={'If-Modified-Since': last_modified}).status_code == 304
