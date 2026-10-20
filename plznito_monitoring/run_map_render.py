@@ -7,6 +7,7 @@ import tempfile
 import re
 from collections import Counter
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,8 @@ DATE_FORMATS = (
     "%Y-%m-%d %H:%M:%S",
     "%d.%m.%Y",
 )
+# Ticket dates are naive Prague local times.
+PLZNITO_TZ = ZoneInfo("Europe/Prague")
 DEFAULT_CENTER = [49.7443392, 13.3766164]
 DEFAULT_ZOOM = 13
 DEFAULT_TIME_FILTER = "last_30_days"
@@ -126,7 +129,7 @@ def _resolve_category_filter(category_id, category_value):
 
 def _to_unix_timestamp(value):
     if value.tzinfo is None:
-        return int(value.replace(tzinfo=datetime.timezone.utc).timestamp())
+        return int(value.replace(tzinfo=PLZNITO_TZ).timestamp())
     return int(value.astimezone(datetime.timezone.utc).timestamp())
 
 
@@ -256,7 +259,8 @@ def serialize_map_data(data_current, popup_mode="compact", now=None):
         raise ValueError("popup_mode must be 'compact' or 'full'.")
 
     if now is None:
-        now = datetime.datetime.now()
+        # Naive Prague time, the same frame as the ticket dates it is compared with.
+        now = datetime.datetime.now(PLZNITO_TZ).replace(tzinfo=None)
 
     recent_cutoff_7 = now - datetime.timedelta(days=7)
     recent_cutoff_30 = now - datetime.timedelta(days=30)

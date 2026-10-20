@@ -123,7 +123,7 @@ def plznito_map_all():
                              ' --file_out templates/plznito_map_all.html'), 503
 
 @app.route('/train_delays/', methods=['GET', 'OPTIONS'])
-@cache.cached()
+@cache.cached(unless=lambda: request.method != 'GET')
 def get_delays():
     if request.method == "OPTIONS":
         return ("", 204)
@@ -251,17 +251,21 @@ def api_counts(loc_id):
     from_date   = request.args.get("from")
     to_date     = request.args.get("to")
 
-    if from_date and not _DATE_RE.match(from_date):
-        abort(400, description="Invalid 'from' date. Use YYYY-MM-DD.")
-    if to_date and not _DATE_RE.match(to_date):
-        abort(400, description="Invalid 'to' date. Use YYYY-MM-DD.")
-    if from_date and to_date:
+    for name, value in (("from", from_date), ("to", to_date)):
+        if not value:
+            continue
+        if not _DATE_RE.match(value):
+            abort(400, description=f"Invalid '{name}' date. Use YYYY-MM-DD.")
         try:
-            span = (_date.fromisoformat(to_date) - _date.fromisoformat(from_date)).days
-            if span > _MAX_DATE_RANGE_DAYS:
-                abort(400, description=f"Date range exceeds maximum of {_MAX_DATE_RANGE_DAYS} days.")
+            _date.fromisoformat(value)
         except ValueError:
-            abort(400, description="Invalid date value.")
+            abort(400, description=f"Invalid '{name}' date value.")
+    if from_date and to_date:
+        span = (_date.fromisoformat(to_date) - _date.fromisoformat(from_date)).days
+        if span < 0:
+            abort(400, description="'from' must not be after 'to'.")
+        if span > _MAX_DATE_RANGE_DAYS:
+            abort(400, description=f"Date range exceeds maximum of {_MAX_DATE_RANGE_DAYS} days.")
 
     allowed_resolutions = {
         "hourly": "substr(ts, 1, 13)",  # 'YYYY-MM-DD HH'
@@ -321,6 +325,12 @@ def api_counts(loc_id):
         source_ids + date_params,
     )
  
+    truncated = len(combined_rows_raw) >= _MAX_RESULT_ROWS or len(per_col_rows) >= _MAX_RESULT_ROWS
+    if truncated:
+        _l.getLogger(__name__).warning(
+            "api_counts %s/%s hit the %d row limit; result is truncated.",
+            loc_id, resolution, _MAX_RESULT_ROWS)
+
     per_col_grouped = {}
     for row in per_col_rows:
         sid = row["source_id"]
@@ -344,6 +354,7 @@ def api_counts(loc_id):
         "resolution": resolution,
         "combined":   combined_rows,
         "collectors": collectors_out,
+        "truncated":  truncated,
     })
  
 # /api/daily kept as alias — frontend still calls it for initial load
@@ -445,6 +456,8 @@ def api_debug(loc_id):
     if not loc:
         abort(404)
     source_ids   = [c["source_id"] for c in loc["collectors"]]
+    if not source_ids:
+        return jsonify({"location": loc_id, "sources": [], "latest_rows": []})
     placeholders = ",".join("?" * len(source_ids))
  
     stats = query(f"""

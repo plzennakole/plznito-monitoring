@@ -200,7 +200,6 @@ def get_plznito_current_data(
         scanned_count += 1
         try:
             scraped_data = download_one_id(ticket_id, source="web")
-            logger.info("Downloaded ticket %d via web scraping.", ticket_id)
         except Exception as exc:  # pragma: no cover - network/runtime dependent
             logger.warning("Web scrape failed for id %s: %s", ticket_id, exc)
             empty_items += 1
@@ -226,6 +225,7 @@ def get_plznito_current_data(
                 )
                 break
             continue
+        logger.info("Downloaded ticket %d via web scraping.", ticket_id)
         items.append(item)
         consecutive_failures = 0
 
@@ -307,14 +307,21 @@ def filter_data(data):
 
 def merge_data(data_old, data_new):
     """
-    Merge two json, use the newer data
+    Merge new records into old ones by id.
+
+    New non-empty fields overwrite old ones, other old fields are kept, so a lightweight
+    scraped record does not wipe ``created``, ``category_id`` etc. of a full API record.
+    Updated and new records move to the end, later duplicates win.
     """
     valid_old = _collect_valid_records(data_old, "existing DB")
     valid_new = _collect_valid_records(data_new, "incoming update")
 
-    ids_new = {record_id for record_id, _ in valid_new}
-    data_old_filtered = [record for record_id, record in valid_old if record_id not in ids_new]
-    data_out = data_old_filtered + [record for _, record in valid_new]
+    merged = dict(valid_old)
+    for record_id, record in valid_new:
+        old_record = merged.pop(record_id, {})
+        new_fields = {key: value for key, value in record.items() if value not in (None, "", [], {})}
+        merged[record_id] = {**old_record, **new_fields}
+    data_out = list(merged.values())
 
     logger.info(
         "Merging old=%d valid/%d input + new=%d valid/%d input => %d output.",
@@ -327,29 +334,45 @@ def merge_data(data_old, data_new):
     return data_out
 
 
-def db_restore(start_json_name=None, data_dirname="."):
-    # how to process all data
-    # aka DB restore
+def _snapshot_items(payload):
+    """
+    Return the records of a snapshot: ``{"items": [...]}`` (update snapshots, old seed files)
+    or ``{"item": {...}}`` (per-id seed files).
+    """
+    if isinstance(payload, dict) and isinstance(payload.get("items"), list):
+        return payload["items"]
+    if isinstance(payload, dict) and isinstance(payload.get("item"), dict) and payload["item"]:
+        return [payload["item"]]
+    raise ValueError("Expected snapshot with 'items' list or non-empty 'item' object.")
+
+
+def db_restore(out_json_name, start_json_name=None, data_dirname=".", filter_cyklo=True):
+    """
+    Rebuild the DB from a seed DB file plus all snapshots in ``data_dirname``.
+    """
     data = _restore_seed_data(start_json_name)
 
+    items = []
+    skipped = 0
     for fname in sorted(os.listdir(data_dirname)):
         full_fname = os.path.join(data_dirname, fname)
         if not (full_fname.endswith(".json") or full_fname.endswith(".bz2")):
             continue
 
         try:
-            data_new = _load_snapshot_payload(full_fname)
-            if data_new is None:
-                continue
-            data_cyklo = filter_data(data_new)
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            logger.warning("Skipping snapshot %s due to invalid payload: %s", full_fname, exc)
-            continue
+            items.extend(_snapshot_items(_load_snapshot_payload(full_fname)))
+        except (OSError, ValueError) as exc:
+            skipped += 1
+            logger.debug("Skipping snapshot %s due to invalid payload: %s", full_fname, exc)
+    if skipped:
+        logger.warning("Skipped %d invalid or empty snapshots in %s.", skipped, data_dirname)
 
-        data = merge_data(data, data_cyklo)
+    if filter_cyklo:
+        items = filter_cyklo_items(items)
+    data = merge_data(data, items)
 
-    _atomic_write_json("plznito_cyklo.json", data, indent=4)
-    logger.info("Restore completed: wrote %d items to plznito_cyklo.json.", len(data))
+    _atomic_write_json(out_json_name, data, indent=4)
+    logger.info("Restore completed: wrote %d items to %s.", len(data), out_json_name)
 
 
 def db_update(
@@ -425,15 +448,16 @@ if __name__ == "__main__":
 
     logger.info(f"Running with args: {args}")
 
-    if args.restore:
-        restore_seed = args.db_json if os.path.exists(args.db_json) else None
-        db_restore(start_json_name=restore_seed, data_dirname="data")
-        raise SystemExit(0)
-
     if args.filter_cyklo is None:
         filter_cyklo = os.path.basename(args.db_json) == CYKLO_DB_FILENAME
     else:
         filter_cyklo = args.filter_cyklo
+
+    if args.restore:
+        restore_seed = args.db_json if os.path.exists(args.db_json) else None
+        db_restore(args.db_json, start_json_name=restore_seed, data_dirname=args.seed_data_dir,
+                   filter_cyklo=filter_cyklo)
+        raise SystemExit(0)
 
     db_update(
         args.db_json,

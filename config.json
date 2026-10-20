@@ -3,7 +3,7 @@
   "httpserver": "flask",
   "flask": {
     "host": "",
-    "debug": true,
+    "debug": false,
     "processes": 4
   }
 }
