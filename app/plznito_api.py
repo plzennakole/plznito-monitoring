@@ -11,14 +11,19 @@ from flask_smorest import Blueprint, abort
 from marshmallow import Schema, fields, validate
 from werkzeug.wrappers import Response
 
+from app.cors import add_cors_headers
 from app.plznito_store import PLZNITO_TZ, IssueNotFoundError, IssueStore, db_path_from_env, filter_issues
 
 CACHE_MAX_AGE_SECONDS = 300
 
 blp = Blueprint(
-    'plznito_api', __name__, url_prefix='/plznito/api',
+    'plznito_api',
+    __name__,
+    url_prefix='/plznito/api',
     description="Issues reported to Plznito (plznito.cz), refreshed every few hours.",
 )
+
+blp.after_request(add_cors_headers)
 
 _stores: dict[pathlib.Path, IssueStore] = {}
 
@@ -37,6 +42,7 @@ def get_store() -> IssueStore:
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
+
 class CommonQuerySchema(Schema):
     status_id = fields.Integer(metadata={'description': "Status id (2 = V řešení, 3 = Vyřešeno, 6 = Odpovězeno)."})
     category_id = fields.Integer(metadata={'description': "Category id."})
@@ -52,8 +58,11 @@ class IssuesQuerySchema(CommonQuerySchema):
 
 
 class NewIssuesQuerySchema(CommonQuerySchema):
-    days = fields.Integer(load_default=7, validate=validate.Range(min=0, max=365),
-                          metadata={'description': "Issues created today or in the previous N days."})
+    days = fields.Integer(
+        load_default=7,
+        validate=validate.Range(min=0, max=365),
+        metadata={'description': "Issues created today or in the previous N days."},
+    )
 
 
 class IssueSchema(Schema):
@@ -98,6 +107,7 @@ class MetaSchema(Schema):
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def _paginate(issues: list[dict[str, Any]], limit: int, offset: int) -> dict[str, Any]:
     """
     Build the list response for already filtered issues.
@@ -112,7 +122,7 @@ def _paginate(issues: list[dict[str, Any]], limit: int, offset: int) -> dict[str
         'limit': limit,
         'offset': offset,
         'updated_at': get_store().updated_at,
-        'items': issues[offset:offset + limit],
+        'items': issues[offset : offset + limit],
     }
 
 
@@ -133,8 +143,7 @@ def _facets(issues: list[dict[str, Any]], id_key: str, label_key: str) -> list[d
     :return: Facet entries with ``id``, ``label`` and ``count``.
     """
     counts = Counter((issue[id_key], issue[label_key]) for issue in issues)
-    return [{'id': facet_id, 'label': label, 'count': count}
-            for (facet_id, label), count in counts.most_common()]
+    return [{'id': facet_id, 'label': label, 'count': count} for (facet_id, label), count in counts.most_common()]
 
 
 @blp.after_request
@@ -154,6 +163,7 @@ def add_cache_headers(response: Response) -> Response:
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
+
 
 @blp.route('/issues')
 @blp.arguments(IssuesQuerySchema, location='query', as_kwargs=True)

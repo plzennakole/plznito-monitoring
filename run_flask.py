@@ -51,8 +51,7 @@ def main() -> None:
     server = config['httpserver']
     if server == 'flask':
         logging.getLogger(__name__).info("Starting Flask server with config %s", config)
-        app.run(host=config['flask']['host'], port=config['port'],
-                debug=config['flask']['debug'], threaded=True)
+        app.run(host=config['flask']['host'], port=config['port'], debug=config['flask']['debug'], threaded=True)
     elif server == 'tornado':
         from tornado.httpserver import HTTPServer
         from tornado.ioloop import IOLoop

@@ -1,2 +1,2 @@
-# Copyright 2026 Pexeso Inc. All rights reserved.
+# Copyright 2026 Plzeň na kole Inc. All rights reserved.
 """Tests package for plznito-monitoring."""

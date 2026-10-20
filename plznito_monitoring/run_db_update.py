@@ -112,7 +112,8 @@ def _max_seed_json_id(seed_data_dir: str) -> int | None:
         return None
 
     file_ids = [
-        int(stem) for stem, ext in (os.path.splitext(fname) for fname in os.listdir(seed_data_dir))
+        int(stem)
+        for stem, ext in (os.path.splitext(fname) for fname in os.listdir(seed_data_dir))
         if ext == ".json" and stem.isdigit()
     ]
     return max(file_ids, default=None)
@@ -132,8 +133,9 @@ def _resolve_anchor_id(
     :raises AnchorResolutionError: If none of the sources gives an id.
     :return: ``(anchor id, source name)``.
     """
-    db_anchor = max((record_id for record_id, _ in _collect_valid_records(existing_records, "existing DB")),
-                    default=None)
+    db_anchor = max(
+        (record_id for record_id, _ in _collect_valid_records(existing_records, "existing DB")), default=None
+    )
     if db_anchor is not None:
         return db_anchor, "db"
 
@@ -146,8 +148,7 @@ def _resolve_anchor_id(
         return seed_anchor, f"seed:{seed_data_dir}"
 
     raise AnchorResolutionError(
-        "Unable to resolve crawl anchor id. Provide --anchor-id or place numeric *.json files "
-        f"in {seed_data_dir}."
+        f"Unable to resolve crawl anchor id. Provide --anchor-id or place numeric *.json files in {seed_data_dir}."
     )
 
 
@@ -470,9 +471,7 @@ def main() -> None:
     parser.set_defaults(filter_cyklo=None)
     args = parser.parse_args()
 
-    logging.basicConfig(filename=LOG_FILE_DEFAULT,
-                        level=logging.INFO,
-                        format='%(asctime)s %(message)s')
+    logging.basicConfig(filename=LOG_FILE_DEFAULT, level=logging.INFO, format='%(asctime)s %(message)s')
 
     logger.info("Running with args: %s", args)
 
@@ -483,8 +482,9 @@ def main() -> None:
 
     if args.restore:
         restore_seed = args.db_json if os.path.exists(args.db_json) else None
-        db_restore(args.db_json, start_json_name=restore_seed, data_dirname=args.seed_data_dir,
-                   filter_cyklo=filter_cyklo)
+        db_restore(
+            args.db_json, start_json_name=restore_seed, data_dirname=args.seed_data_dir, filter_cyklo=filter_cyklo
+        )
         return
 
     if args.save_update_data:

@@ -31,16 +31,19 @@ log = logging.getLogger(__name__)
 
 # ── Database ───────────────────────────────────────────────────────────────────
 
+
 def get_db():
     db = sqlite3.connect(cfg.DB_PATH)
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA busy_timeout=5000")
     return db
 
+
 def checkpoint_db():
     db = get_db()
     db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     db.close()
+
 
 def init_db():
     db = get_db()
@@ -65,7 +68,9 @@ def init_db():
     db.close()
     log.info("DB initialised at %s", cfg.DB_PATH)
 
+
 # ── HTTP helper ────────────────────────────────────────────────────────────────
+
 
 def fetch(url, timeout=60, encoding=None) -> str:
     try:
@@ -84,7 +89,9 @@ def fetch(url, timeout=60, encoding=None) -> str:
             continue
     return r.content.decode("utf-8", errors="replace")
 
+
 # ── Eco-counter ────────────────────────────────────────────────────────────────
+
 
 def parse_ecocounter_csv(text: str) -> tuple[list[tuple], list[tuple]] | None:
     """
@@ -109,11 +116,11 @@ def parse_ecocounter_csv(text: str) -> tuple[list[tuple], list[tuple]] | None:
     i_site = col("siteid")
     if i_site is None:
         i_site = col("site_id")
-    i_ts   = col("timestamp")
-    i_bi   = col("bike_count_in")
-    i_bo   = col("bike_count_out")
-    i_si   = col("scooter_count_in")
-    i_so   = col("scooter_count_out")
+    i_ts = col("timestamp")
+    i_bi = col("bike_count_in")
+    i_bo = col("bike_count_out")
+    i_si = col("scooter_count_in")
+    i_so = col("scooter_count_out")
 
     if i_site is None or i_ts is None or i_bi is None or i_bo is None:
         log.error("Eco-counter CSV missing expected columns. Header: %s", header)
@@ -125,7 +132,7 @@ def parse_ecocounter_csv(text: str) -> tuple[list[tuple], list[tuple]] | None:
         if len(parts) < max(i_site, i_ts, i_bi, i_bo) + 1:
             continue
         site_id = parts[i_site].strip().strip('"')
-        ts_raw  = parts[i_ts].strip().strip('"')
+        ts_raw = parts[i_ts].strip().strip('"')
         # Normalise timestamp to YYYY-MM-DD HH:MM:SS
         ts = ts_raw.replace("T", " ").replace("Z", "")[:19]
         if not ts or not ts[0].isdigit():
@@ -138,7 +145,7 @@ def parse_ecocounter_csv(text: str) -> tuple[list[tuple], list[tuple]] | None:
         except (ValueError, IndexError):
             continue
 
-        rows_in.append((f"eco_{site_id}_in",  ts, bi, si))
+        rows_in.append((f"eco_{site_id}_in", ts, bi, si))
         rows_out.append((f"eco_{site_id}_out", ts, bo, so))
     return rows_in, rows_out
 
@@ -175,7 +182,9 @@ def ingest_ecocounter():
     else:
         log.warning("  Eco-counter: 0 rows parsed — check CSV format")
 
+
 # ── Camera ─────────────────────────────────────────────────────────────────────
+
 
 def _parse_camera_csv(text: str, cam_id: str) -> list[tuple]:
     """Parse a camera CSV and return list of (source_id, ts, bikes, scooters)."""
@@ -213,7 +222,7 @@ def _parse_camera_csv(text: str, cam_id: str) -> list[tuple]:
                     return i
         return None
 
-    i_coll  = col("id kolektoru", "collector_id")
+    i_coll = col("id kolektoru", "collector_id")
     i_start = col("začátek intervalu", "start", "timestamp")
     i_bikes = col("jízdní kola", "bikes", "kola")
     i_scoot = col("koloběžky", "scooters", "kolobezky")
@@ -229,9 +238,9 @@ def _parse_camera_csv(text: str, cam_id: str) -> list[tuple]:
             continue
         try:
             coll_id = parts[i_coll].strip().strip('"')
-            ts_raw  = parts[i_start].strip().strip('"')
-            bikes   = int(float(parts[i_bikes].strip() or 0))
-            scoot   = int(float(parts[i_scoot].strip() or 0)) if i_scoot is not None else 0
+            ts_raw = parts[i_start].strip().strip('"')
+            bikes = int(float(parts[i_bikes].strip() or 0))
+            scoot = int(float(parts[i_scoot].strip() or 0)) if i_scoot is not None else 0
         except (ValueError, IndexError):
             continue
 
@@ -248,6 +257,7 @@ def _parse_camera_csv(text: str, cam_id: str) -> list[tuple]:
         source_id = f"cam_{cam_id}_c{coll_id}"
         rows.append((source_id, ts, bikes, scoot))
     return rows
+
 
 def ingest_camera(cam_id: str, name: str):
     url = cfg.CAMERA_URL.format(cam_id=cam_id)
@@ -285,22 +295,27 @@ def ingest_camera(cam_id: str, name: str):
     if loc and not loc["collectors"]:
         for i, sid in enumerate(found):
             coll_id = sid.split("_c")[-1]
-            loc["collectors"].append({
-                "collector_id": coll_id,
-                "source_id": sid,
-                "label": f"Směr {coll_id}",
-                "color": cfg.PALETTE[i % len(cfg.PALETTE)],
-            })
+            loc["collectors"].append(
+                {
+                    "collector_id": coll_id,
+                    "source_id": sid,
+                    "label": f"Směr {coll_id}",
+                    "color": cfg.PALETTE[i % len(cfg.PALETTE)],
+                }
+            )
         cfg.SOURCE_MAP.update({c["source_id"]: (loc["id"], c) for c in loc["collectors"]})
 
     db.close()
 
+
 # ── Weather ────────────────────────────────────────────────────────────────────
+
 
 def _next_month(d: dt_date) -> dt_date:
     if d.month == 12:
         return dt_date(d.year + 1, 1, 1)
     return dt_date(d.year, d.month + 1, 1)
+
 
 def _chmi_parse_csv(text: str, var: str) -> dict:
     """Parse ČHMÚ historical daily CSV. Returns {date_str: float|None}."""
@@ -319,13 +334,13 @@ def _chmi_parse_csv(text: str, var: str) -> dict:
                     return i
         return None
 
-    dt_col  = idx("dt", "date", "datum")
+    dt_col = idx("dt", "date", "datum")
     val_col = idx("value", var.lower(), "hodnota")
-    yr_col  = idx("rok", "year")
-    mo_col  = idx("mesic", "month")
-    dy_col  = idx("den", "day")
+    yr_col = idx("rok", "year")
+    mo_col = idx("mesic", "month")
+    dy_col = idx("den", "day")
 
-    use_dt  = dt_col is not None and val_col is not None
+    use_dt = dt_col is not None and val_col is not None
     use_ymd = all(x is not None for x in (yr_col, mo_col, dy_col, val_col))
 
     if not use_dt and not use_ymd:
@@ -350,11 +365,12 @@ def _chmi_parse_csv(text: str, var: str) -> dict:
             continue
     return result
 
+
 def _chmi_parse_recent_json(data) -> dict:
     """Parse ČHMÚ recent daily JSON. Returns {date: {"t": float|None, "p": float|None}}."""
     result: dict[str, dict[str, float | None]] = {}
     try:
-        inner  = data["data"]["data"]
+        inner = data["data"]["data"]
         header = [h.strip() for h in inner["header"].split(",")]
         values = inner["values"]
     except (KeyError, TypeError):
@@ -393,6 +409,7 @@ def _chmi_parse_recent_json(data) -> dict:
         result.setdefault(date_str, {}).setdefault(var_key, val)
     return result
 
+
 def ingest_weather(delete_cache=False):
     try:
         import requests  # noqa: F401 - availability check only
@@ -411,17 +428,18 @@ def ingest_weather(delete_cache=False):
     # ── 1. Historical CSVs (cached) ──────────────────────────────────────────
     CACHE_MAX_AGE = 30 * 86400
     for var, key, subdir in [("T", "t", "temperature"), ("SRA", "p", "precipitation")]:
-        url        = f"{cfg.CHMI_HIST_BASE}/{subdir}/dly-0-20000-0-{cfg.CHMI_STATION}-{var}.csv"
+        url = f"{cfg.CHMI_HIST_BASE}/{subdir}/dly-0-20000-0-{cfg.CHMI_STATION}-{var}.csv"
         cache_file = cfg.CHMI_CACHE_DIR / f"{cfg.CHMI_STATION}-{var}.csv"
-        use_cache  = cache_file.exists() and (time.time() - cache_file.stat().st_mtime) < CACHE_MAX_AGE
+        use_cache = cache_file.exists() and (time.time() - cache_file.stat().st_mtime) < CACHE_MAX_AGE
 
         if use_cache:
-            log.info("ČHMÚ %s → cache (%dd old)", var, int((time.time()-cache_file.stat().st_mtime)/86400))
+            log.info("ČHMÚ %s → cache (%dd old)", var, int((time.time() - cache_file.stat().st_mtime) / 86400))
             text = cache_file.read_text(encoding="utf-8")
         else:
             log.info("ČHMÚ %s → %s", var, url)
             try:
                 import requests as req
+
                 r = req.get(url, timeout=120)
                 r.raise_for_status()
                 text = r.content.decode("utf-8-sig")
@@ -437,6 +455,7 @@ def ingest_weather(delete_cache=False):
 
     # ── 2. Recent monthly JSON ────────────────────────────────────────────────
     import requests as req
+
     today = dt_date.today()
     # Fetch from 2 months back to catch gap between historical and now
     start_dt = dt_date(today.year, today.month, 1)
@@ -490,11 +509,13 @@ def ingest_weather(delete_cache=False):
     db.close()
     log.info("Weather: %d days upserted", len(rows))
 
+
 # ── Main ───────────────────────────────────────────────────────────────────────
+
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--no-weather",   action="store_true")
+    parser.add_argument("--no-weather", action="store_true")
     parser.add_argument("--delete-cache", action="store_true")
     parser.add_argument("--source", choices=["eco", "cam", "weather", "all"], default="all")
     args = parser.parse_args()
@@ -525,6 +546,7 @@ def main():
 
     checkpoint_db()
     log.info("Done ✓")
+
 
 if __name__ == "__main__":
     main()

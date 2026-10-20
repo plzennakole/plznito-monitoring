@@ -850,9 +850,12 @@ def get_map(data_current: list[Any], cluster: bool = False, popup_mode: str = "c
     return _build_map_html(serialized_data, cluster=cluster)
 
 
-def render_map_to_file(file_in: str = str(PLZNITO_DIR / "plznito_cyklo.json"),
-                       file_out: str = str(PLZNITO_DIR / "templates" / "plznito_map.html"),
-                       cluster: bool = False, popup_mode: str = "compact") -> None:
+def render_map_to_file(
+    file_in: str = str(PLZNITO_DIR / "plznito_cyklo.json"),
+    file_out: str = str(PLZNITO_DIR / "templates" / "plznito_map.html"),
+    cluster: bool = False,
+    popup_mode: str = "compact",
+) -> None:
     """
     Render a JSON DB file into a map page, written atomically.
 
@@ -884,8 +887,9 @@ def render_map_to_file(file_in: str = str(PLZNITO_DIR / "plznito_cyklo.json"),
 def main() -> None:
     """Command line entry point."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--log_level", type=str, default="INFO",
-                        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+    parser.add_argument(
+        "--log_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    )
     parser.add_argument("--file_in", type=str, default=str(PLZNITO_DIR / "plznito_cyklo.json"))
     parser.add_argument("--file_out", type=str, default=str(PLZNITO_DIR / "templates" / "plznito_map.html"))
     parser.add_argument("--cluster_style", action="store_true")
@@ -893,9 +897,9 @@ def main() -> None:
     args = parser.parse_args()
 
     log_level = getattr(logging, args.log_level.upper(), logging.INFO)
-    logging.basicConfig(filename=str(PLZNITO_DIR / "plznito_monitoring.log"),
-                        level=log_level,
-                        format='%(asctime)s %(message)s')
+    logging.basicConfig(
+        filename=str(PLZNITO_DIR / "plznito_monitoring.log"), level=log_level, format='%(asctime)s %(message)s'
+    )
     logger.setLevel(log_level)
 
     render_map_to_file(args.file_in, args.file_out, cluster=args.cluster_style, popup_mode=args.popup_mode)

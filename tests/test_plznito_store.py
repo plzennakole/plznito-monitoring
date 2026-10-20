@@ -11,8 +11,9 @@ from app import plznito_store
 from app.plznito_store import IssueNotFoundError, IssueStore, filter_issues, to_api_issue
 
 
-def _api_record(item_id: int, created: str, status_id: int = 3, name: str = "Díra",
-                report: str = "", category_id: int = 4) -> dict:
+def _api_record(
+    item_id: int, created: str, status_id: int = 3, name: str = "Díra", report: str = "", category_id: int = 4
+) -> dict:
     return {
         'id': item_id,
         'name': name,
@@ -65,6 +66,7 @@ def db_path(tmp_path: pathlib.Path) -> pathlib.Path:
 
 # ── to_api_issue ─────────────────────────────────────────────────────────────
 
+
 def test_to_api_issue_api_shape() -> None:
     issue = to_api_issue(_api_record(1, '2025-01-10'))
     assert issue == {
@@ -97,13 +99,16 @@ def test_to_api_issue_scraped_shape() -> None:
     assert issue['is_cyklo'] is True
 
 
-@pytest.mark.parametrize('record', [
-    {'id': 4, 'name': "Bez data", 'status_id': 3, 'latitude': '49.7', 'longitude': '13.3'},
-    {**_api_record(1, '2025-01-10'), 'latitude': None},
-    {**_api_record(1, '2025-01-10'), 'status_id': None},
-    {**_api_record(1, '2025-01-10'), 'id': 'abc'},
-    "not-a-dict",
-])
+@pytest.mark.parametrize(
+    'record',
+    [
+        {'id': 4, 'name': "Bez data", 'status_id': 3, 'latitude': '49.7', 'longitude': '13.3'},
+        {**_api_record(1, '2025-01-10'), 'latitude': None},
+        {**_api_record(1, '2025-01-10'), 'status_id': None},
+        {**_api_record(1, '2025-01-10'), 'id': 'abc'},
+        "not-a-dict",
+    ],
+)
 def test_to_api_issue_invalid_records(record: object) -> None:
     assert to_api_issue(record) is None
 
@@ -114,6 +119,7 @@ def test_to_api_issue_status_label(status_id: int, label: str) -> None:
 
 
 # ── IssueStore ───────────────────────────────────────────────────────────────
+
 
 def test_store_skips_invalid_and_sorts_newest_first(db_path: pathlib.Path) -> None:
     issues = IssueStore(db_path).get_issues()
@@ -156,20 +162,24 @@ def test_store_reloads_when_file_changes(db_path: pathlib.Path) -> None:
 
 # ── filter_issues ────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize('filters, expected_ids', [
-    ({}, [5, 3, 2, 1]),
-    ({'since': datetime.date(2026, 3, 15)}, [5, 3]),
-    ({'until': datetime.date(2026, 3, 14)}, [2, 1]),
-    ({'since': datetime.date(2026, 3, 14), 'until': datetime.date(2026, 3, 14)}, [2]),
-    ({'since': datetime.date(2026, 3, 16), 'until': datetime.date(2026, 3, 1)}, []),
-    ({'status_id': 3}, [5, 1]),
-    ({'category_id': 4}, [5, 2, 1]),
-    ({'cyklo': True}, [3, 2]),
-    ({'cyklo': False}, [5, 1]),
-    ({'since_id': 2}, [5, 3]),
-    ({'since_id': 5}, []),
-    ({'cyklo': True, 'status_id': 2}, [2]),
-])
+
+@pytest.mark.parametrize(
+    'filters, expected_ids',
+    [
+        ({}, [5, 3, 2, 1]),
+        ({'since': datetime.date(2026, 3, 15)}, [5, 3]),
+        ({'until': datetime.date(2026, 3, 14)}, [2, 1]),
+        ({'since': datetime.date(2026, 3, 14), 'until': datetime.date(2026, 3, 14)}, [2]),
+        ({'since': datetime.date(2026, 3, 16), 'until': datetime.date(2026, 3, 1)}, []),
+        ({'status_id': 3}, [5, 1]),
+        ({'category_id': 4}, [5, 2, 1]),
+        ({'cyklo': True}, [3, 2]),
+        ({'cyklo': False}, [5, 1]),
+        ({'since_id': 2}, [5, 3]),
+        ({'since_id': 5}, []),
+        ({'cyklo': True, 'status_id': 2}, [2]),
+    ],
+)
 def test_filter_issues(db_path: pathlib.Path, filters: dict, expected_ids: list[int]) -> None:
     issues = IssueStore(db_path).get_issues()
     assert [issue['id'] for issue in filter_issues(issues, **filters)] == expected_ids

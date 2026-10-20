@@ -55,17 +55,16 @@ Historical camera/eco data can be inserted directly into SQLite:
 
 ```python
 import sqlite3, config as cfg
+
 db = sqlite3.connect(cfg.DB_PATH)
 
 # Eco-counter historical example:
 # source_id format: eco_{site_id}_in  /  eco_{site_id}_out
-db.execute("INSERT OR REPLACE INTO counts VALUES (?,?,?,?)",
-           ("eco_300048586_in", "2024-06-01 08:15:00", 12, 0))
+db.execute("INSERT OR REPLACE INTO counts VALUES (?,?,?,?)", ("eco_300048586_in", "2024-06-01 08:15:00", 12, 0))
 
 # Camera historical example:
 # source_id format: cam_{cam_id}_c{collector_id}
-db.execute("INSERT OR REPLACE INTO counts VALUES (?,?,?,?)",
-           ("cam_29_c8", "2024-06-01 08:15:00", 5, 0))
+db.execute("INSERT OR REPLACE INTO counts VALUES (?,?,?,?)", ("cam_29_c8", "2024-06-01 08:15:00", 5, 0))
 db.commit()
 ```
 
