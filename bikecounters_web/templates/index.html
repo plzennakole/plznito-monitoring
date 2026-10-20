@@ -31,6 +31,7 @@ body {
   color: var(--text);
   font-family: 'DM Sans', sans-serif;
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
 }
 
@@ -83,7 +84,7 @@ body {
   color: var(--text-soft);
   cursor: pointer;
   border-left: 2px solid transparent;
-  transition: all 0.12s;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
   user-select: none;
 }
 .nav-item:hover { background: var(--surface2); color: var(--text); }
@@ -101,7 +102,7 @@ body {
   font-weight: 500;
   color: var(--text-soft);
   cursor: pointer;
-  transition: all 0.12s;
+  transition: background 0.12s, color 0.12s;
   user-select: none;
 }
 .nav-group-header:hover { background: var(--surface2); color: var(--text); }
@@ -115,8 +116,9 @@ body {
 #main {
   flex: 1;
   min-width: 0;
-  padding: 2rem;
-  max-width: 1100px;
+  padding: clamp(1rem, 3vw, 2.5rem);
+  max-width: 1600px;
+  margin: 0 auto;
 }
 .content-header {
   display: flex;
@@ -345,7 +347,7 @@ body {
 
 .chart-body {
   padding: 0.5rem 0.75rem 1rem;
-  height: 300px;
+  height: clamp(260px, 42vh, 520px);
   position: relative;
 }
 .chart-loading {
@@ -367,7 +369,7 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 300px;
+  height: min(300px, 50vh);
   color: var(--muted);
   font-family: 'DM Mono', monospace;
   font-size: 0.75rem;
@@ -400,6 +402,96 @@ footer {
 footer a { color: var(--text-soft); text-decoration: none; }
 footer a:hover { color: var(--green); }
 
+/* ── Mobile top bar + drawer backdrop (hidden on desktop) ── */
+#topbar { display: none; }
+#nav-backdrop { display: none; }
+.nav-toggle {
+  background: none;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 1.1rem;
+  width: 40px; height: 40px;
+  cursor: pointer;
+}
+.topbar-logo {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.3rem;
+  letter-spacing: 0.12em;
+}
+.topbar-logo span { color: var(--green); }
+
+/* ── Responsive ── */
+@media (max-width: 1199px) {
+  .stat-cards { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+  body { display: block; }
+  #topbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    padding: 0.6rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  #sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    width: min(85vw, 300px);
+    height: 100%;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    visibility: hidden;
+  }
+  body.nav-open #sidebar { transform: none; visibility: visible; }
+  body.nav-open { overflow: hidden; }
+  body.nav-open #nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgba(1, 4, 9, 0.6);
+  }
+
+  .content-header h2 { font-size: 1.5rem; }
+  .stat-cards { gap: 0.75rem; }
+  .stat-card { padding: 0.8rem 0.9rem; }
+  .stat-card-value { font-size: 1.6rem; }
+
+  .chart-head { padding: 0.75rem 0.9rem; }
+  .chart-title { flex-basis: 100%; }
+  .ctrl-divider { display: none; }
+  .chart-date-label { min-width: 0; flex: 1; }
+  .chart-legend { padding: 0.6rem 0.9rem 0; gap: 0.6rem; }
+  .chart-body { padding: 0.4rem 0.3rem 0.6rem; height: 260px; }
+}
+
+@media (max-width: 600px) {
+  .overview-table .col-optional { display: none; }
+  .overview-table th, .overview-table td { padding-left: 0.6rem; padding-right: 0.6rem; }
+  .overview-table th:first-child, .overview-table td:first-child {
+    position: sticky;
+    left: 0;
+    background: var(--surface);
+  }
+  .pct-bar { width: 50px; }
+}
+
+@media (max-width: 360px) {
+  .stat-cards { grid-template-columns: 1fr; }
+}
+
+@media (pointer: coarse) {
+  .btn, .seg-btn, .nav-item, .nav-group-header { min-height: 36px; }
+  .btn-icon { width: 36px; height: 36px; }
+}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
@@ -407,6 +499,14 @@ footer a:hover { color: var(--green); }
 </style>
 </head>
 <body>
+
+<!-- Mobile top bar -->
+<header id="topbar">
+  <button class="nav-toggle" id="nav-toggle" type="button" aria-label="Menu" aria-controls="sidebar"
+          aria-expanded="false" onclick="toggleNav()">☰</button>
+  <span class="topbar-logo">PLZEŇ <span>CYKLO</span></span>
+</header>
+<div id="nav-backdrop" onclick="closeNav()"></div>
 
 <!-- Sidebar -->
 <nav id="sidebar">
@@ -477,6 +577,41 @@ async function apiFetch(url) {
   return r.json();
 }
 
+// ── Layout ─────────────────────────────────────────────────────────────────────
+const compactQuery = window.matchMedia('(max-width: 768px)');
+function isCompact() { return compactQuery.matches; }
+
+// Mobile drawer menu
+function openNav() {
+  document.body.classList.add('nav-open');
+  document.getElementById('nav-toggle').setAttribute('aria-expanded', 'true');
+  (document.querySelector('#sidebar .nav-item.active') || document.querySelector('#sidebar .nav-item'))?.focus();
+}
+function closeNav() {
+  if (!document.body.classList.contains('nav-open')) return;
+  document.body.classList.remove('nav-open');
+  const toggle = document.getElementById('nav-toggle');
+  toggle.setAttribute('aria-expanded', 'false');
+  if (isCompact()) toggle.focus();
+}
+function toggleNav() {
+  document.body.classList.contains('nav-open') ? closeNav() : openNav();
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeNav();
+  // Menu entries are divs: let Enter/Space activate them like buttons.
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('.nav-item, .nav-group-header')) {
+    e.preventDefault();
+    e.target.click();
+  }
+});
+
+// Re-render the charts with the other density when crossing the phone breakpoint.
+compactQuery.addEventListener('change', () => {
+  if (!isCompact()) closeNav();
+  if (currentLoc && currentData) renderPage();
+});
+
 // ── Nav ────────────────────────────────────────────────────────────────────────
 async function loadNav() {
   navData = await apiFetch('/bikecounters/api/nav');
@@ -508,6 +643,7 @@ function buildNavItem(item) {
 
     const header = document.createElement('div');
     header.className = 'nav-group-header';
+    header.tabIndex = 0;
     header.innerHTML = `
       <span>${item.icon || '📍'}</span>
       <span>${item.name}</span>
@@ -519,6 +655,7 @@ function buildNavItem(item) {
     for (const child of item.children) {
       const ci = document.createElement('div');
       ci.className = 'nav-item nav-subitem';
+      ci.tabIndex = 0;
       ci.dataset.locId = child.id;
       ci.style.setProperty('--item-color', child.color);
       ci.innerHTML = `<span class="nav-dot"></span>${child.name}`;
@@ -537,6 +674,7 @@ function buildNavItem(item) {
   } else {
     const el = document.createElement('div');
     el.className = 'nav-item';
+    el.tabIndex = 0;
     el.dataset.locId = item.id;
     el.style.setProperty('--item-color', item.color);
     el.innerHTML = `<span class="nav-dot"></span>${item.icon ? item.icon + ' ' : ''}${item.name}`;
@@ -562,6 +700,7 @@ function setNavActive(locId) {
 
 // ── Location loading ───────────────────────────────────────────────────────────
 async function selectLocation(locId) {
+  closeNav();
   if (locId === currentLocId) return;
   currentLocId = locId;
   setNavActive(locId);
@@ -769,6 +908,8 @@ function renderStatCards() {
 // ── Chart ──────────────────────────────────────────────────────────────────────
 // Shared look for all charts; callers add callbacks and extra scales.
 function baseChartOptions() {
+  const compact = isCompact();
+  const tickFont = { family: "'DM Mono', monospace", size: compact ? 9 : 10 };
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -788,13 +929,13 @@ function baseChartOptions() {
     scales: {
       x: {
         grid:  { color: '#21262d' },
-        ticks: { color: '#6e7681', font: { family: "'DM Mono', monospace", size: 10 },
-                 maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+        ticks: { color: '#6e7681', font: tickFont,
+                 maxRotation: 0, autoSkip: true, maxTicksLimit: compact ? 5 : 10 },
         border: { color: '#30363d' },
       },
       y: {
         grid:  { color: '#21262d' },
-        ticks: { color: '#6e7681', font: { family: "'DM Mono', monospace", size: 10 },
+        ticks: { color: '#6e7681', font: tickFont,
                  callback: v => v.toLocaleString('cs-CZ') },
         border: { color: '#30363d' },
         beginAtZero: true,
@@ -887,7 +1028,7 @@ function renderYoyChart() {
   });
 
   const options = baseChartOptions();
-  options.scales.x.ticks.maxTicksLimit = 12;
+  options.scales.x.ticks.maxTicksLimit = isCompact() ? 6 : 12;
   options.plugins.tooltip.callbacks = {
     title: items => MONTH_NAMES[items[0].dataIndex],
     label: item => {
@@ -943,9 +1084,9 @@ async function renderOverview() {
           <thead><tr>
             <th>Lokalita</th>
             <th>Letos</th>
-            <th>Loni</th>
+            <th class="col-optional">Loni</th>
             <th>Změna od 1.1.</th>
-            <th>Shodných dní</th>
+            <th class="col-optional">Shodných dní</th>
             <th>Tento měsíc</th>
           </tr></thead>
           <tbody>
@@ -954,9 +1095,9 @@ async function renderOverview() {
                 <td><span class="overview-name"><span class="nav-dot" style="--item-color:${r.color}"></span>${r.name}
                   <span class="overview-type">${r.type === 'ecocounter' ? 'ECO' : 'KAMERA'}</span></span></td>
                 <td>${r.ytd.days ? fmt(r.ytd.current) : '—'}</td>
-                <td>${r.ytd.days ? fmt(r.ytd.previous) : '—'}</td>
+                <td class="col-optional">${r.ytd.days ? fmt(r.ytd.previous) : '—'}</td>
                 <td>${pctCell(r.ytd.pct)}${pctBar(r.ytd.pct, maxAbs)}</td>
-                <td>${r.ytd.days}</td>
+                <td class="col-optional">${r.ytd.days}</td>
                 <td title="${r.mtd.days} shodných dní">${pctCell(r.mtd.pct)}</td>
               </tr>`).join('')}
           </tbody>
@@ -1033,7 +1174,8 @@ function buildDatasets(filtered) {
     const rainData = filtered.map(d => weatherData[d]?.p ?? null);
     const maxRain  = Math.max(0, ...rainData.filter(v => v != null));
     chart.options.scales.y2.max = maxRain > 0 ? maxRain * 4 : 40;
-    chart.options.scales.y1.display = true;
+    // The temperature axis costs too much width on phones; the legend and tooltip name it.
+    chart.options.scales.y1.display = !isCompact();
     datasets.push({
       type: 'bar', label: 'Srážky (mm)', data: rainData,
       backgroundColor: 'rgba(88,166,255,0.2)', borderColor: 'rgba(88,166,255,0.4)',
