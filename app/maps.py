@@ -78,8 +78,7 @@ def map_bike() -> BaseResponse | tuple[str, int]:
     return _render_map_page(
         'plznito_index.html',
         'plznito_map.html',
-        '--popup_mode api --file_in plznito_monitoring/plznito_cyklo.json'
-        ' --file_out plznito_monitoring/templates/plznito_map.html',
+        '--popup_mode api --cyklo --file_out plznito_monitoring/templates/plznito_map.html',
     )
 
 
@@ -89,6 +88,5 @@ def map_all() -> BaseResponse | tuple[str, int]:
     return _render_map_page(
         'plznito_full_map_index.html',
         'plznito_map_all.html',
-        '--cluster_style --popup_mode api --file_in plznito_monitoring/plznito_all.json'
-        ' --file_out plznito_monitoring/templates/plznito_map_all.html',
+        '--cluster_style --popup_mode api --file_out plznito_monitoring/templates/plznito_map_all.html',
     )

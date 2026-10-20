@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import re
@@ -7,6 +8,7 @@ from datetime import datetime
 
 import pytest
 
+from plznito_monitoring import db
 from plznito_monitoring import run_map_render as map_render
 
 
@@ -199,13 +201,13 @@ class RunMapRenderTests(unittest.TestCase):
         records = [valid_a, valid_b, invalid]
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            input_path = os.path.join(tmpdir, "input.json")
+            db_path = os.path.join(tmpdir, "plznito.db")
             output_path = os.path.join(tmpdir, "nested", "map.html")
-            with open(input_path, "w", encoding="utf-8") as fw:
-                json.dump(records, fw)
+            with contextlib.closing(db.connect(db_path)) as conn:
+                db.upsert_records(conn, records)
 
             map_render.render_map_to_file(
-                file_in=input_path,
+                db_path=db_path,
                 file_out=output_path,
                 cluster=False,
                 popup_mode="compact",
@@ -367,3 +369,24 @@ def test_map_config_cannot_break_out_of_the_script():
     html_output = map_render.get_map([item])
     assert "</script><script>alert(1)" not in html_output
     assert _map_config(html_output)["markers"][0]["name"] == item["name"]
+
+
+@pytest.mark.parametrize("cyklo, expected_count", [(False, 2), (True, 1)])
+def test_render_map_to_file_cyklo_subset(tmp_path, cyklo, expected_count):
+    db_path = tmp_path / "plznito.db"
+    records = [
+        {**_valid_item(item_id=1), "name": "Rozbitá cyklostezka"},
+        {**_valid_item(item_id=2), "name": "Díra", "report": "Díra v silnici"},
+    ]
+    with contextlib.closing(db.connect(db_path)) as conn:
+        db.upsert_records(conn, records)
+    output_path = tmp_path / "map.html"
+
+    map_render.render_map_to_file(str(db_path), str(output_path), cyklo=cyklo)
+
+    assert output_path.read_text(encoding="utf-8").count('"ticket_url"') == expected_count
+
+
+def test_render_map_to_file_needs_existing_db(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        map_render.render_map_to_file(str(tmp_path / "missing.db"), str(tmp_path / "map.html"))

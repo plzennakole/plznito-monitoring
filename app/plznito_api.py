@@ -30,7 +30,7 @@ _stores: dict[pathlib.Path, IssueStore] = {}
 
 def get_store() -> IssueStore:
     """
-    Return the (process-wide) issue store for the configured JSON DB path.
+    Return the (process-wide) issue store for the configured DB path.
 
     :return: Issue store.
     """

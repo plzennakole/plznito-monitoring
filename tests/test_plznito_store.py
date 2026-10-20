@@ -1,7 +1,6 @@
 # Copyright 2026 Plzeň na kole Inc. All rights reserved.
+import contextlib
 import datetime
-import json
-import os
 import pathlib
 from unittest.mock import patch
 
@@ -9,6 +8,7 @@ import pytest
 
 from app import plznito_store
 from app.plznito_store import IssueNotFoundError, IssueStore, filter_issues, to_api_issue
+from plznito_monitoring import db
 
 
 def _api_record(
@@ -57,10 +57,20 @@ RECORDS = [
 ]
 
 
+UPDATED_AT = datetime.datetime(2026, 4, 1, 6, 0, tzinfo=datetime.UTC)
+
+
+def write_db(path: pathlib.Path, records: list, finished_at: datetime.datetime = UPDATED_AT) -> None:
+    """Merge records into the DB at ``path`` and log a successful run finished at ``finished_at``."""
+    with contextlib.closing(db.connect(path)) as conn:
+        db.upsert_records(conn, records)
+        db.finish_run(conn, db.start_run(conn), ok=True, stats={}, now=finished_at)
+
+
 @pytest.fixture
 def db_path(tmp_path: pathlib.Path) -> pathlib.Path:
-    path = tmp_path / 'plznito_all.json'
-    path.write_text(json.dumps(RECORDS), encoding='utf-8')
+    path = tmp_path / 'plznito.db'
+    write_db(path, RECORDS)
     return path
 
 
@@ -136,12 +146,13 @@ def test_store_get_issue(db_path: pathlib.Path) -> None:
 
 def test_store_missing_file(tmp_path: pathlib.Path) -> None:
     with pytest.raises(FileNotFoundError):
-        IssueStore(tmp_path / 'missing.json').get_issues()
+        IssueStore(tmp_path / 'missing.db').get_issues()
+    assert not (tmp_path / 'missing.db').exists()
 
 
-def test_store_loads_once_while_file_unchanged(db_path: pathlib.Path) -> None:
+def test_store_loads_once_while_db_unchanged(db_path: pathlib.Path) -> None:
     store = IssueStore(db_path)
-    with patch.object(plznito_store.json, 'load', wraps=json.load) as mock_load:
+    with patch.object(plznito_store.db, 'load_records', wraps=db.load_records) as mock_load:
         store.get_issues()
         store.get_issues()
         store.get_issue(1)
@@ -149,16 +160,34 @@ def test_store_loads_once_while_file_unchanged(db_path: pathlib.Path) -> None:
     assert mock_load.call_count == 1
 
 
-def test_store_reloads_when_file_changes(db_path: pathlib.Path) -> None:
+def test_store_reloads_after_successful_run(db_path: pathlib.Path) -> None:
     store = IssueStore(db_path)
     assert len(store.get_issues()) == 4
+    assert store.updated_at == UPDATED_AT
 
-    db_path.write_text(json.dumps(RECORDS + [_api_record(6, '2026-04-01')]), encoding='utf-8')
-    mtime = db_path.stat().st_mtime + 10
-    os.utime(db_path, (mtime, mtime))
+    later = UPDATED_AT + datetime.timedelta(hours=6)
+    write_db(db_path, [_api_record(6, '2026-04-01')], finished_at=later)
 
     assert store.get_issues()[0]['id'] == 6
-    assert store.updated_at == datetime.datetime.fromtimestamp(mtime, tz=datetime.UTC)
+    assert store.updated_at == later
+
+
+def test_store_ignores_failed_run(db_path: pathlib.Path) -> None:
+    store = IssueStore(db_path)
+    store.get_issues()
+    with contextlib.closing(db.connect(db_path)) as conn:
+        db.finish_run(conn, db.start_run(conn), ok=False, stats={})
+    with patch.object(plznito_store.db, 'load_records', wraps=db.load_records) as mock_load:
+        assert store.updated_at == UPDATED_AT
+    assert mock_load.call_count == 0
+
+
+def test_store_of_never_updated_db(tmp_path: pathlib.Path) -> None:
+    path = tmp_path / 'plznito.db'
+    db.connect(path).close()
+    store = IssueStore(path)
+    assert store.get_issues() == []
+    assert store.updated_at == plznito_store.NEVER_UPDATED
 
 
 # ── filter_issues ────────────────────────────────────────────────────────────

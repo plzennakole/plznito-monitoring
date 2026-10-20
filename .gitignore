@@ -96,4 +96,7 @@ venv.bak/
 .DS_Store
 .idea/
 /plznito_monitoring/data/
+/plznito_monitoring/plznito.db
+/plznito_monitoring/plznito.db-*
+/plznito_monitoring/backups/
 /data/**

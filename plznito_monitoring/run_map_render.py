@@ -2,6 +2,7 @@
 """Render Plznito tickets into a self-contained Leaflet map HTML page."""
 
 import argparse
+import contextlib
 import datetime
 import json
 import logging
@@ -11,13 +12,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from plznito_monitoring import db
 from plznito_monitoring.common import (
     CATEGORY_IDS,
     CATEGORY_LABELS,
     PLZNITO_TZ,
     STATUS_LABELS,
     atomic_open,
-    load_json,
     parse_int,
     setup_logging,
     status_label,
@@ -569,29 +570,24 @@ def get_map(data_current: list[Any], cluster: bool = False, popup_mode: str = "c
 
 
 def render_map_to_file(
-    file_in: str = str(PLZNITO_DIR / "plznito_cyklo.json"),
+    db_path: str = str(db.DEFAULT_DB_PATH),
     file_out: str = str(PLZNITO_DIR / "templates" / "plznito_map.html"),
+    cyklo: bool = False,
     cluster: bool = False,
     popup_mode: str = "compact",
 ) -> None:
     """
-    Render a JSON DB file into a map page, written atomically.
+    Render the tickets of the DB into a map page, written atomically.
 
-    :param file_in: JSON list of records, or ``{"items": [...]}``.
+    :param db_path: Existing SQLite DB file.
     :param file_out: Output HTML path.
+    :param cyklo: Only cycling-related tickets.
     :param cluster: Cluster markers.
     :param popup_mode: One of :data:`POPUP_MODES`.
-    :raises ValueError: If the input has another shape.
     """
-    logger.info("Loading data from %s", file_in)
-    data = load_json(file_in)
-
-    if isinstance(data, dict) and isinstance(data.get("items"), list):
-        data_records = data["items"]
-    elif isinstance(data, list):
-        data_records = data
-    else:
-        raise ValueError("Input JSON must be a list of records or an object with an 'items' list.")
+    logger.info("Loading %s from %s", "cycling tickets" if cyklo else "all tickets", db_path)
+    with contextlib.closing(db.connect(db_path, create=False)) as conn:
+        data_records = db.load_records(conn, cyklo=True if cyklo else None)
 
     logger.info("Rendering map from %d records", len(data_records))
     map_html = get_map(data_records, cluster=cluster, popup_mode=popup_mode)
@@ -608,7 +604,8 @@ def main() -> None:
     parser.add_argument(
         "--log_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
     )
-    parser.add_argument("--file_in", type=str, default=str(PLZNITO_DIR / "plznito_cyklo.json"))
+    parser.add_argument("--db", type=str, default=str(db.DEFAULT_DB_PATH))
+    parser.add_argument("--cyklo", action="store_true", help="Only cycling-related tickets.")
     parser.add_argument("--file_out", type=str, default=str(PLZNITO_DIR / "templates" / "plznito_map.html"))
     parser.add_argument("--cluster_style", action="store_true")
     parser.add_argument("--popup_mode", type=str, default="compact", choices=POPUP_MODES)
@@ -616,7 +613,9 @@ def main() -> None:
 
     setup_logging(str(PLZNITO_DIR / "plznito_monitoring.log"), getattr(logging, args.log_level.upper(), logging.INFO))
     try:
-        render_map_to_file(args.file_in, args.file_out, cluster=args.cluster_style, popup_mode=args.popup_mode)
+        render_map_to_file(
+            args.db, args.file_out, cyklo=args.cyklo, cluster=args.cluster_style, popup_mode=args.popup_mode
+        )
     except Exception:
         # Top-level crash handler: the traceback goes to the log file and to stderr (cron/deploy log).
         logger.exception("Rendering %s failed.", args.file_out)

@@ -1,8 +1,8 @@
 # Copyright 2026 Plzeň na kole Inc. All rights reserved.
-"""In-memory store of Plznito issues, reloaded whenever the JSON DB file changes."""
+"""In-memory store of Plznito issues, reloaded after each successful update of the SQLite DB."""
 
+import contextlib
 import datetime
-import json
 import logging
 import os
 import pathlib
@@ -10,14 +10,15 @@ import threading
 from collections import Counter
 from typing import Any
 
+from plznito_monitoring import db
 from plznito_monitoring.common import PLZNITO_TZ, parse_int, status_label
 from plznito_monitoring.cyklo_filter import is_cyklo_item
 from plznito_monitoring.run_map_render import estimate_creation_dates, normalize_item
 
 logger = logging.getLogger(__name__)
 
-_PLZNITO_DIR = pathlib.Path(__file__).parent.parent / 'plznito_monitoring'
-DEFAULT_DB_PATH = _PLZNITO_DIR / 'plznito_all.json'
+# ``updated_at`` of a DB that has never been updated successfully.
+NEVER_UPDATED = datetime.datetime.fromtimestamp(0, tz=datetime.UTC)
 
 
 class IssueNotFoundError(Exception):
@@ -26,12 +27,12 @@ class IssueNotFoundError(Exception):
 
 def db_path_from_env() -> pathlib.Path:
     """
-    Resolve the Plznito JSON DB path from ``PLZNITO_DB_JSON`` or the repo default.
+    Resolve the Plznito DB path from ``PLZNITO_DB`` or the repo default.
 
-    :return: Path to the JSON DB file.
+    :return: Path to the SQLite DB file.
     """
-    value = (os.getenv('PLZNITO_DB_JSON') or '').strip()
-    return pathlib.Path(value) if value else DEFAULT_DB_PATH
+    value = (os.getenv('PLZNITO_DB') or '').strip()
+    return pathlib.Path(value) if value else db.DEFAULT_DB_PATH
 
 
 def to_api_issue(
@@ -40,7 +41,7 @@ def to_api_issue(
     """
     Convert a raw Plznito record (API or web-scrape shape) into the public API shape.
 
-    :param item: Raw record as stored in the JSON DB.
+    :param item: Raw record as stored in the DB.
     :param created_estimates: Creation date estimates for scraped records, see
         :func:`plznito_monitoring.run_map_render.estimate_creation_dates`.
     :return: API issue dict, or ``None`` if the record lacks id, status, date or coordinates.
@@ -109,60 +110,60 @@ def filter_issues(
 
 class IssueStore:
     """
-    Plznito issues held in memory, reloaded when the JSON DB file's mtime changes.
+    Plznito issues held in memory, reloaded when a new successful update run appears in the DB.
 
-    The cron job rewrites the file atomically every few hours, so the mtime is a
-    reliable cache key and one ``stat`` per request is all the invalidation needed.
+    The cron job updates the DB every few hours, so one small query per request is all the
+    invalidation needed.
     """
 
     def __init__(self, path: pathlib.Path) -> None:
         """
-        :param path: Path to the JSON DB file (list of raw Plznito records).
+        :param path: Path to the SQLite DB file.
         """
         self.path = path
-        self._mtime: float | None = None
+        self._updated_at: datetime.datetime | None = None
         self._issues: list[dict[str, Any]] = []
         self._by_id: dict[int, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
-    def _reload_if_changed(self) -> float:
+    def _reload_if_changed(self) -> datetime.datetime:
         """
-        Reload the JSON DB file if its mtime differs from the loaded one.
+        Reload the issues if the DB was updated since they were loaded.
 
-        :raises FileNotFoundError: If the JSON DB file does not exist.
-        :return: mtime of the loaded file.
+        :raises FileNotFoundError: If the DB file does not exist.
+        :return: Time of the last successful update (UTC).
         """
-        mtime = os.stat(self.path).st_mtime
-        if mtime == self._mtime:
-            return mtime
-        with self._lock:
-            if mtime == self._mtime:
-                return mtime
-            with open(self.path, encoding='utf-8') as fr:
-                raw_items = json.load(fr)
+        with contextlib.closing(db.connect(self.path, create=False)) as conn:
+            updated_at = db.last_update(conn) or NEVER_UPDATED
+            if updated_at == self._updated_at:
+                return updated_at
+            with self._lock:
+                if updated_at == self._updated_at:
+                    return updated_at
+                raw_items = db.load_records(conn)
 
-            issues = []
-            skipped: Counter[str] = Counter()
-            created_estimates = estimate_creation_dates(raw_items)
-            for item in raw_items:
-                issue = to_api_issue(item, created_estimates)
-                if issue is None:
-                    skipped['invalid'] += 1
-                    continue
-                issues.append(issue)
-            issues.sort(key=lambda issue: (issue['created'], issue['id']), reverse=True)
+                issues = []
+                skipped: Counter[str] = Counter()
+                created_estimates = estimate_creation_dates(raw_items)
+                for item in raw_items:
+                    issue = to_api_issue(item, created_estimates)
+                    if issue is None:
+                        skipped['invalid'] += 1
+                        continue
+                    issues.append(issue)
+                issues.sort(key=lambda issue: (issue['created'], issue['id']), reverse=True)
 
-            self._issues = issues
-            self._by_id = {issue['id']: issue for issue in issues}
-            self._mtime = mtime
-            logger.info("Loaded %d Plznito issues from %s (skipped %d)", len(issues), self.path, skipped['invalid'])
-        return mtime
+                self._issues = issues
+                self._by_id = {issue['id']: issue for issue in issues}
+                self._updated_at = updated_at
+                logger.info("Loaded %d Plznito issues from %s (skipped %d)", len(issues), self.path, skipped['invalid'])
+        return updated_at
 
     def get_issues(self) -> list[dict[str, Any]]:
         """
         Return all valid issues, newest first.
 
-        :raises FileNotFoundError: If the JSON DB file does not exist.
+        :raises FileNotFoundError: If the DB file does not exist.
         :return: API issues.
         """
         self._reload_if_changed()
@@ -185,7 +186,6 @@ class IssueStore:
     @property
     def updated_at(self) -> datetime.datetime:
         """
-        :return: Last modification time of the loaded JSON DB file (UTC).
+        :return: Time of the last successful DB update (UTC).
         """
-        mtime = self._reload_if_changed()
-        return datetime.datetime.fromtimestamp(mtime, tz=datetime.UTC)
+        return self._reload_if_changed()
