@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from plznito_monitoring import run_db_update as db_update
+from plznito_monitoring.common import parse_int
 
 
 class RunDbUpdateTests(unittest.TestCase):
@@ -40,8 +41,8 @@ class RunDbUpdateTests(unittest.TestCase):
         ]
 
         merged = db_update.merge_data(old_records, new_records)
-        merged_ids = [db_update._normalize_id(record["id"]) for record in merged]
-        merged_by_id = {db_update._normalize_id(record["id"]): record for record in merged}
+        merged_ids = [parse_int(record["id"]) for record in merged]
+        merged_by_id = {parse_int(record["id"]): record for record in merged}
 
         self.assertEqual(merged_ids, [2, 1, 3])
         self.assertEqual(merged_by_id[1]["name"], "new")

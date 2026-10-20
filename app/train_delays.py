@@ -3,8 +3,8 @@ import unicodedata
 
 import requests
 from bs4 import BeautifulSoup
-from fake_headers import Headers
 
+USER_AGENT = "plznito-monitoring/1.0 (+https://github.com/plzennakole/plznito-monitoring)"
 TRAIN_ID_RE = re.compile(r"\b([A-Za-z]{1,6})\s*([0-9]{1,6})\b")
 TIME_RE = re.compile(r"\b([0-2]?\d:[0-5]\d)\b")
 
@@ -93,8 +93,7 @@ def scrape_babitron_delays(url):
     results = {}
     source_page = source_page_from_url(url)
 
-    headers = Headers(headers=True).generate()
-    response = requests.get(url, headers=headers, timeout=30)
+    response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
     if response.status_code != 200:
         raise Exception(f"Chyba při stahování stránky: {response.status_code}")
 

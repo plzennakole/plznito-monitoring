@@ -86,36 +86,43 @@ def fetch(url, timeout=60, encoding=None) -> str:
 
 # ── Eco-counter ────────────────────────────────────────────────────────────────
 
-def ingest_ecocounter():
-    log.info("Eco-counter → %s", cfg.ECO_URL)
-    text = fetch(cfg.ECO_URL)
+def parse_ecocounter_csv(text: str) -> tuple[list[tuple], list[tuple]] | None:
+    """
+    Parse the eco-counter CSV export.
+
+    :param text: Semicolon-separated CSV with a header row.
+    :return: ``(rows_in, rows_out)`` of ``(source_id, ts, bikes, scooters)``, or ``None`` if the
+        header lacks the expected columns.
+    """
     lines = text.strip().splitlines()
     if not lines:
-        log.warning("Empty eco-counter response")
-        return
+        return [], []
 
     header = [h.strip().strip('"').lower() for h in lines[0].split(";")]
-    def col(name):
+
+    def col(name: str) -> int | None:
         try:
             return header.index(name)
         except ValueError:
             return None
 
-    i_site = col("siteid") or col("site_id")
+    i_site = col("siteid")
+    if i_site is None:
+        i_site = col("site_id")
     i_ts   = col("timestamp")
     i_bi   = col("bike_count_in")
     i_bo   = col("bike_count_out")
     i_si   = col("scooter_count_in")
     i_so   = col("scooter_count_out")
 
-    if None in (i_site, i_ts, i_bi, i_bo):
+    if i_site is None or i_ts is None or i_bi is None or i_bo is None:
         log.error("Eco-counter CSV missing expected columns. Header: %s", header)
-        return
+        return None
 
     rows_in, rows_out = [], []
     for line in lines[1:]:
         parts = line.split(";")
-        if len(parts) < max(i_ts, i_bi, i_bo) + 1:
+        if len(parts) < max(i_site, i_ts, i_bi, i_bo) + 1:
             continue
         site_id = parts[i_site].strip().strip('"')
         ts_raw  = parts[i_ts].strip().strip('"')
@@ -133,6 +140,20 @@ def ingest_ecocounter():
 
         rows_in.append((f"eco_{site_id}_in",  ts, bi, si))
         rows_out.append((f"eco_{site_id}_out", ts, bo, so))
+    return rows_in, rows_out
+
+
+def ingest_ecocounter():
+    log.info("Eco-counter → %s", cfg.ECO_URL)
+    text = fetch(cfg.ECO_URL)
+    if not text.strip():
+        log.warning("Empty eco-counter response")
+        return
+
+    parsed = parse_ecocounter_csv(text)
+    if parsed is None:
+        return
+    rows_in, rows_out = parsed
 
     db = get_db()
     try:

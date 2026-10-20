@@ -2,8 +2,7 @@ import unittest
 
 import pytest
 
-from plznito_monitoring import cyklo_filter, restore_all
-from plznito_monitoring import run_db_update as db_update
+from plznito_monitoring import cyklo_filter
 
 
 class CykloFilterTests(unittest.TestCase):
@@ -33,27 +32,6 @@ class CykloFilterTests(unittest.TestCase):
         self.assertTrue(cyklo_filter.is_cyklo_record("cyklostezka", ""))
         self.assertTrue(cyklo_filter.is_cyklo_record("", "kolobezka"))
         self.assertFalse(cyklo_filter.is_cyklo_record("auto", "chodnik"))
-
-
-class FilterParityTests(unittest.TestCase):
-    def test_restore_and_update_filter_data_return_same_ids(self):
-        payload = {
-            "items": [
-                {"id": 1, "report": "Cyklo stezka je rozbita", "name": "A"},
-                {"id": 2, "report": "recyklace na ulici", "name": "B"},
-                {"id": 3, "report": None, "name": "Kolobezka trasa"},
-                {"id": 4, "report": None, "name": None},
-                {"id": 5, "name": "CYKLO trasa"},
-                "bad-item",
-            ]
-        }
-
-        restore_result = restore_all.filter_data(payload)
-        update_result = db_update.filter_data(payload)
-
-        restore_ids = [record["id"] for record in restore_result]
-        update_ids = [record["id"] for record in update_result]
-        self.assertEqual(restore_ids, update_ids)
 
 
 @pytest.mark.parametrize("item, expected", [

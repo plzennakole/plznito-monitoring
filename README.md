@@ -35,7 +35,7 @@ Server configuration is in `config.json` (port, debug mode, WSGI backend: `flask
 
 ### 1. Plznito map (`plznito_monitoring/`)
 
-Scrapes civic tickets from plzni.to and renders interactive Folium maps.
+Scrapes civic tickets from plznito.cz and renders interactive Leaflet maps.
 
 All commands run from the repo root as modules (`python -m ...`). Defaults (log file, `data/` seed dir, snapshots) live in `plznito_monitoring/`, regardless of the working directory.
 
@@ -57,8 +57,11 @@ Optional crawl tuning:
 python -m plznito_monitoring.run_db_update --anchor-id 49553 --id-window-back 500 --id-lookahead 300
 ```
 
-Restore-only mode (no live scrape):
+Restore-only mode (no live scrape; rebuilds the DB from `plznito_monitoring/data/` snapshots):
 ```shell
+# Optionally bulk-download a range of tickets into data/<id>.json first
+python -m plznito_monitoring.restore_all --start-id 49000 --end-id 49600
+
 python -m plznito_monitoring.run_db_update --restore
 ```
 
