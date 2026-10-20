@@ -32,7 +32,8 @@ def map_bike() -> str | tuple[str, int]:
     return _render_map_page(
         'plznito_index.html',
         'plznito_map.html',
-        '--file_in plznito_monitoring/plznito_cyklo.json --file_out plznito_monitoring/templates/plznito_map.html',
+        '--popup_mode api --file_in plznito_monitoring/plznito_cyklo.json'
+        ' --file_out plznito_monitoring/templates/plznito_map.html',
     )
 
 

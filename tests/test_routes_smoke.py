@@ -1,10 +1,14 @@
 # Copyright 2026 Plzeň na kole Inc. All rights reserved.
+import pathlib
+from collections.abc import Iterator
 from unittest.mock import patch
 
 import pytest
 from flask.testing import FlaskClient
+from jinja2 import ChoiceLoader, FileSystemLoader
 
-from app import bikecounters
+from app import app, bikecounters
+from plznito_monitoring import run_map_render as map_render
 
 
 @pytest.mark.parametrize(
@@ -74,3 +78,35 @@ def test_bikecounter_endpoints_are_cached(client: FlaskClient, path: str) -> Non
 def test_bikecounters_page_supports_conditional_requests(client: FlaskClient) -> None:
     last_modified = client.get('/bikecounters').headers['Last-Modified']
     assert client.get('/bikecounters', headers={'If-Modified-Since': last_modified}).status_code == 304
+
+
+@pytest.fixture
+def rendered_maps(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Serve small freshly rendered maps instead of the (git-ignored) generated ones."""
+    item = {
+        'id': 1,
+        'name': "Díra",
+        'status_id': 3,
+        'latitude': '49.74',
+        'longitude': '13.37',
+        'created': {'date': '2025-01-10 10:00:00.000000'},
+    }
+    for name in ('plznito_map.html', 'plznito_map_all.html'):
+        (tmp_path / name).write_text(map_render.get_map([item]), encoding='utf-8')
+    monkeypatch.setattr(app, 'jinja_loader', ChoiceLoader([FileSystemLoader(str(tmp_path)), app.jinja_loader]))
+    app.jinja_env.cache.clear()
+    yield
+    app.jinja_env.cache.clear()
+
+
+@pytest.mark.parametrize('path', ['/plznito/map-bike', '/plznito/map-all'])
+@pytest.mark.parametrize('query, has_header', [('', True), ('?embed=1', False)])
+def test_map_pages_header_and_embed(
+    client: FlaskClient, rendered_maps: None, path: str, query: str, has_header: bool
+) -> None:
+    response = client.get(path + query)
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert ('class="pz-header"' in body) is has_header
+    assert '<meta name="viewport"' in body
+    assert 'id="plznito-app"' in body

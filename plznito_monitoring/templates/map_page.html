@@ -1,0 +1,46 @@
+{% extends "layout.html" %}
+{# Shared shell of the map pages; ?embed=1 drops the header for iframes. #}
+{% block style %}
+    {%- set embed = request.args.get('embed') %}
+    body { --plznito-header-h: {{ '0px' if embed else '48px' }}; overflow: hidden; }
+    .pz-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-sizing: border-box;
+      height: 48px;
+      padding: 0 16px;
+      background: #fff;
+      border-bottom: 1px solid #d1d9e0;
+    }
+    .pz-header h1 { margin: 0; font-size: 16px; font-weight: 600; white-space: nowrap; }
+    .pz-header h1 span { color: #16a34a; }
+    .pz-header time { font-size: 13px; color: #59636e; white-space: nowrap; }
+    .pz-header nav { margin-left: auto; display: flex; gap: 4px; }
+    .pz-header nav a {
+      padding: 6px 10px;
+      border-radius: 8px;
+      color: #0969da;
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .pz-header nav a:hover { background: #f6f8fa; }
+    .pz-header nav a[aria-current="page"] { color: #1f2328; background: #eef1f4; }
+    @media (max-width: 560px) { .pz-header time { display: none; } }
+{% endblock %}
+{% block body %}
+  {%- set embed = request.args.get('embed') %}
+  {% if not embed %}
+  <header class="pz-header">
+    <h1>Plzni.to <span>·</span> {% block map_title %}{% endblock %}</h1>
+    <time id="plznito-updated"></time>
+    <nav aria-label="Mapy">
+      <a href="{{ url_for('maps.map_bike') }}"{% if request.endpoint == 'maps.map_bike' %} aria-current="page"{% endif %}>Cyklo</a>
+      <a href="{{ url_for('maps.map_all') }}"{% if request.endpoint == 'maps.map_all' %} aria-current="page"{% endif %}>Všechna hlášení</a>
+    </nav>
+  </header>
+  {% endif %}
+  {% block map %}{% endblock %}
+{% endblock %}

@@ -1,11 +1,13 @@
 {% extends "layout.html" %}
-{% block title %}Missing generated map{% endblock %}
-{% block head %} {{ super() }} {% endblock %}
+{% block title %}Mapa zatím není vygenerovaná{% endblock %}
+{% block style %}
+    main { max-width: 720px; margin: 48px auto; padding: 0 16px; }
+    pre { padding: 12px; background: #fff; border: 1px solid #d1d9e0; border-radius: 8px; overflow-x: auto; }
+{% endblock %}
 {% block body %}
-<div class="w3-container" style="margin-top: 24px;">
-    <h2>Generated map file is missing</h2>
-    <p>File <code>{{ map_name }}</code> was not found in <code>app/templates</code>.</p>
-    <p>Generate it with:</p>
-    <pre><code>{{ generate_command }}</code></pre>
-</div>
+<main>
+  <h2>Mapa zatím není vygenerovaná</h2>
+  <p>Soubor <code>{{ map_name }}</code> chybí v <code>plznito_monitoring/templates</code>. Vygenerujte ho příkazem:</p>
+  <pre><code>{{ generate_command }}</code></pre>
+</main>
 {% endblock %}

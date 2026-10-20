@@ -1,7 +1,4 @@
-{% extends "layout.html" %}
-{% block title %} Cyklo hlášení v plzni.to {% endblock %}
-{% block head %} {{ super() }} {% endblock %}
-{% block body %}
-    {% include "plznito_map.html" %}
-{% endblock %}
-
+{% extends "map_page.html" %}
+{% block title %}Cyklo hlášení v plzni.to{% endblock %}
+{% block map_title %}cyklo hlášení{% endblock %}
+{% block map %}{% include "plznito_map.html" %}{% endblock %}
