@@ -5,16 +5,22 @@ import logging
 import os
 import tempfile
 from datetime import datetime
+from pathlib import Path
 
-from cyklo_filter import filter_cyklo_items, to_lower_text
-from restore_all import download_one_id
+from plznito_monitoring.cyklo_filter import filter_cyklo_items, to_lower_text
+from plznito_monitoring.restore_all import download_one_id
+
 SCRAPER_IMPORT_ERROR = None
 
 logger = logging.getLogger(__name__)
+# Defaults live next to this file, so the scripts work from any working directory.
+PLZNITO_DIR = Path(__file__).parent
 CYKLO_DB_FILENAME = "plznito_cyklo.json"
 ID_WINDOW_BACK_DEFAULT = 100
 ID_LOOKAHEAD_DEFAULT = 200
-SEED_DATA_DIR_DEFAULT = "data"
+SEED_DATA_DIR_DEFAULT = str(PLZNITO_DIR / "data")
+LOG_FILE_DEFAULT = str(PLZNITO_DIR / "plznito_monitoring.log")
+SNAPSHOT_DIR_DEFAULT = str(PLZNITO_DIR / "notebooks")
 MAX_CONSECUTIVE_SCRAPE_FAILURES = 10
 
 
@@ -429,7 +435,7 @@ def db_update(
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db_json", type=str, default=CYKLO_DB_FILENAME)
+    parser.add_argument("--db_json", type=str, default=str(PLZNITO_DIR / CYKLO_DB_FILENAME))
     parser.add_argument("--filter_cyklo", dest="filter_cyklo", action="store_true")
     parser.add_argument("--no-filter-cyklo", dest="filter_cyklo", action="store_false")
     parser.add_argument("--restore", action="store_true")
@@ -442,7 +448,7 @@ if __name__ == "__main__":
     parser.set_defaults(filter_cyklo=None)
     args = parser.parse_args()
 
-    logging.basicConfig(filename='plznito_monitoring.log',
+    logging.basicConfig(filename=LOG_FILE_DEFAULT,
                         level=logging.INFO,
                         format='%(asctime)s %(message)s')
 
@@ -461,7 +467,7 @@ if __name__ == "__main__":
 
     db_update(
         args.db_json,
-        out_dirname="notebooks",
+        out_dirname=SNAPSHOT_DIR_DEFAULT,
         filter_cyklo=filter_cyklo,
         save_update_data=args.save_update_data,
         write_cyklo_json_path=args.write_cyklo_json,

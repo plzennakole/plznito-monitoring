@@ -6,11 +6,12 @@ import pathlib
 from collections import Counter
 from typing import Any
 
-from flask import Response, request
+from flask import request
 from flask_smorest import Blueprint, abort
 from marshmallow import Schema, fields, validate
+from werkzeug.wrappers import Response
 
-from app.plznito_store import IssueNotFoundError, IssueStore, PLZNITO_TZ, db_path_from_env, filter_issues
+from app.plznito_store import PLZNITO_TZ, IssueNotFoundError, IssueStore, db_path_from_env, filter_issues
 
 CACHE_MAX_AGE_SECONDS = 300
 
@@ -185,9 +186,10 @@ def list_new_issues(limit: int, offset: int, days: int, **filters: Any) -> dict[
 def get_issue(issue_id: int) -> dict[str, Any]:
     """Get a single issue by its Plznito id."""
     try:
-        return get_store().get_issue(issue_id)
+        issue = get_store().get_issue(issue_id)
     except IssueNotFoundError as error:
         abort(404, message=str(error))
+    return issue
 
 
 @blp.route('/meta')

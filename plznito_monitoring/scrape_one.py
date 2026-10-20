@@ -1,7 +1,7 @@
 import argparse
 import json
 
-from restore_all import download_one_id
+from plznito_monitoring.restore_all import download_one_id
 
 
 def main():

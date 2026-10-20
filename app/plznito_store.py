@@ -2,16 +2,17 @@
 """In-memory store of Plznito issues, reloaded whenever the JSON DB file changes."""
 
 import datetime
-import importlib.util
 import json
 import logging
 import os
 import pathlib
 import threading
 from collections import Counter
-from types import ModuleType
 from typing import Any
 from zoneinfo import ZoneInfo
+
+from plznito_monitoring import cyklo_filter
+from plznito_monitoring import run_map_render as map_render
 
 logger = logging.getLogger(__name__)
 
@@ -27,23 +28,6 @@ STATUS_LABELS = {
     5: "Nepatří městu",
     6: "Odpovězeno",
 }
-
-
-def _load_module(name: str) -> ModuleType:
-    """
-    Load a sibling script from ``plznito_monitoring/`` (it is not a package).
-
-    :param name: Module file name without the ``.py`` suffix.
-    :return: The loaded module.
-    """
-    spec = importlib.util.spec_from_file_location(f'plznito_monitoring.{name}', _PLZNITO_DIR / f'{name}.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-map_render = _load_module('run_map_render')
-cyklo_filter = _load_module('cyklo_filter')
 
 
 class IssueNotFoundError(Exception):
@@ -145,13 +129,19 @@ class IssueStore:
         self._by_id: dict[int, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
-    def _reload_if_changed(self) -> None:
+    def _reload_if_changed(self) -> float:
+        """
+        Reload the JSON DB file if its mtime differs from the loaded one.
+
+        :raises FileNotFoundError: If the JSON DB file does not exist.
+        :return: mtime of the loaded file.
+        """
         mtime = os.stat(self.path).st_mtime
         if mtime == self._mtime:
-            return
+            return mtime
         with self._lock:
             if mtime == self._mtime:
-                return
+                return mtime
             with open(self.path, encoding='utf-8') as fr:
                 raw_items = json.load(fr)
 
@@ -170,6 +160,7 @@ class IssueStore:
             self._mtime = mtime
             logger.info("Loaded %d Plznito issues from %s (skipped %d)",
                         len(issues), self.path, skipped['invalid'])
+        return mtime
 
     def get_issues(self) -> list[dict[str, Any]]:
         """
@@ -200,5 +191,5 @@ class IssueStore:
         """
         :return: Last modification time of the loaded JSON DB file (UTC).
         """
-        self._reload_if_changed()
-        return datetime.datetime.fromtimestamp(self._mtime, tz=datetime.timezone.utc)
+        mtime = self._reload_if_changed()
+        return datetime.datetime.fromtimestamp(mtime, tz=datetime.UTC)

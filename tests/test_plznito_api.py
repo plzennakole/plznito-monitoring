@@ -3,14 +3,13 @@ import datetime
 import json
 import os
 import pathlib
-from typing import Iterator
+from collections.abc import Iterator
 from unittest.mock import patch
 
 import pytest
 from flask.testing import FlaskClient
 
-from app import app
-from app import plznito_api
+from app import app, plznito_api
 from tests.test_plznito_store import RECORDS, _api_record
 
 

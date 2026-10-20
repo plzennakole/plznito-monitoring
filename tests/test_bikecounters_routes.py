@@ -1,19 +1,10 @@
 # Copyright 2026 Plzeň na kole Inc. All rights reserved.
-from typing import Iterator
 from unittest.mock import patch
 
 import pytest
 from flask.testing import FlaskClient
 
-from app import app
 from app import routes
-
-
-@pytest.fixture
-def client() -> Iterator[FlaskClient]:
-    app.config['TESTING'] = True
-    with app.test_client() as test_client:
-        yield test_client
 
 
 @pytest.mark.parametrize('query', [

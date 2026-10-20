@@ -1,28 +1,18 @@
-import importlib.util
 import os
 import re
 import sqlite3
-from datetime import date as _date, timedelta as _timedelta
+from datetime import date as _date
+from datetime import timedelta as _timedelta
 
 from dotenv import load_dotenv
-import pathlib
-
-from flask import jsonify, request, render_template, abort, Response
-from jinja2 import TemplateNotFound
+from flask import Response, abort, jsonify, render_template, request
 from flask_caching import Cache
-
-_BW_DIR = pathlib.Path(__file__).parent.parent / "bikecounters_web"
-
-_spec = importlib.util.spec_from_file_location("bikecounters_web.config", _BW_DIR / "config.py")
-bw_cfg = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(bw_cfg)
-
-_yoy_spec = importlib.util.spec_from_file_location("bikecounters_web.yoy", _BW_DIR / "yoy.py")
-bw_yoy = importlib.util.module_from_spec(_yoy_spec)
-_yoy_spec.loader.exec_module(bw_yoy)
+from jinja2 import TemplateNotFound
 
 from app import app
 from app.train_delays import scrape_babitron_delays
+from bikecounters_web import config as bw_cfg
+from bikecounters_web import yoy as bw_yoy
 
 load_dotenv()
 
@@ -106,9 +96,9 @@ def index():
     except TemplateNotFound:
         return render_template('map_missing.html',
             map_name='plznito_map.html',
-            generate_command='cd plznito_monitoring && python run_map_render.py'
-                             ' --file_in plznito_cyklo.json'
-                             ' --file_out templates/plznito_map.html'), 503
+            generate_command='python -m plznito_monitoring.run_map_render'
+                             ' --file_in plznito_monitoring/plznito_cyklo.json'
+                             ' --file_out plznito_monitoring/templates/plznito_map.html'), 503
 
 @app.route('/plznito/map-all')
 def plznito_map_all():
@@ -117,10 +107,10 @@ def plznito_map_all():
     except TemplateNotFound:
         return render_template('map_missing.html',
             map_name='plznito_map_all.html',
-            generate_command='cd plznito_monitoring && python run_map_render.py'
+            generate_command='python -m plznito_monitoring.run_map_render'
                              ' --cluster_style --popup_mode full'
-                             ' --file_in plznito_all.json'
-                             ' --file_out templates/plznito_map_all.html'), 503
+                             ' --file_in plznito_monitoring/plznito_all.json'
+                             ' --file_out plznito_monitoring/templates/plznito_map_all.html'), 503
 
 @app.route('/train_delays/', methods=['GET', 'OPTIONS'])
 @cache.cached(unless=lambda: request.method != 'GET')
@@ -135,7 +125,7 @@ def get_delays():
 
 @app.route('/bikecounters')
 def get_bikecounters():
-    html_path = _BW_DIR / "templates" / "index.html"
+    html_path = bw_cfg.BASE_DIR / "templates" / "index.html"
     return Response(html_path.read_text(encoding="utf-8"), mimetype="text/html")
 
 # ── Nav API ────────────────────────────────────────────────────────────────────
@@ -174,12 +164,12 @@ def api_nav():
                 group_info = bw_cfg.GROUPS.get(gid, {"label": gid})
                 children = [
                     {
-                        "id":    l["id"],
-                        "name":  l["name"],
-                        "color": l["color"],
+                        "id":    location["id"],
+                        "name":  location["name"],
+                        "color": location["color"],
                     }
-                    for l in bw_cfg.LOCATIONS
-                    if l.get("group") == gid
+                    for location in bw_cfg.LOCATIONS
+                    if location.get("group") == gid
                 ]
                 cam_items.append({
                     "type":     "group",

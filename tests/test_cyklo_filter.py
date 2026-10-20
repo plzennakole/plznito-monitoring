@@ -2,23 +2,8 @@ import unittest
 
 import pytest
 
-import cyklo_filter
-
-try:
-    import run_db_update as db_update
-except Exception as import_error:  # pragma: no cover - environment dependent
-    db_update = None
-    DB_UPDATE_IMPORT_ERROR = import_error
-else:
-    DB_UPDATE_IMPORT_ERROR = None
-
-try:
-    import restore_all
-except Exception as import_error:  # pragma: no cover - environment dependent
-    restore_all = None
-    RESTORE_IMPORT_ERROR = import_error
-else:
-    RESTORE_IMPORT_ERROR = None
+from plznito_monitoring import cyklo_filter, restore_all
+from plznito_monitoring import run_db_update as db_update
 
 
 class CykloFilterTests(unittest.TestCase):
@@ -50,10 +35,6 @@ class CykloFilterTests(unittest.TestCase):
         self.assertFalse(cyklo_filter.is_cyklo_record("auto", "chodnik"))
 
 
-@unittest.skipIf(
-    db_update is None or restore_all is None,
-    f"Imports failed: run_db_update={DB_UPDATE_IMPORT_ERROR}, restore_all={RESTORE_IMPORT_ERROR}",
-)
 class FilterParityTests(unittest.TestCase):
     def test_restore_and_update_filter_data_return_same_ids(self):
         payload = {
