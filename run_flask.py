@@ -1,67 +1,75 @@
-""" run_flask.py
-    Required packages:
-    - flask
-    - folium
-    Usage:
-    Start the flask server by running:
-        $ python flask_example.py
-    And then head to http://127.0.0.1:5000/ in your browser to see the map displayed
+# Copyright 2026 Plzeň na kole Inc. All rights reserved.
+"""
+Run the web app with the server set in ``config.json`` (``flask``, ``tornado`` or ``gevent``).
+
+    $ python run_flask.py [-c extra_config.json ...]
+
+For production, ``gunicorn -w 2 -b 0.0.0.0:5000 app:app`` works without this script.
 """
 
 import argparse
 import json
+import logging
 import os
+from typing import Any
 
 from app import app
 
+DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+
+
+def load_config(extra_paths: list[str]) -> dict[str, Any]:
+    """
+    Merge ``config.json`` (if present) with extra config files, later files win.
+
+    :param extra_paths: Additional config files; each must exist.
+    :raises FileNotFoundError: If an extra config file is missing.
+    :return: Merged config.
+    """
+    for path in extra_paths:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Config file {path} not found")
+
+    config: dict[str, Any] = {}
+    for path in [DEFAULT_CONFIG_PATH, *extra_paths]:
+        if os.path.exists(path):
+            with open(path, encoding='utf-8') as fr:
+                config.update(json.load(fr))
+    return config
+
+
+def main() -> None:
+    """Command line entry point."""
+    parser = argparse.ArgumentParser(description="Run \"Plznito monitoring\" server.")
+    parser.add_argument('--configs', '-c', nargs='*', default=[], help="additional config file(s)")
+    args = parser.parse_args()
+
+    config = load_config(args.configs)
+    app.config['app'] = config
+    app.config['root'] = os.path.dirname(os.path.abspath(__file__))
+
+    server = config['httpserver']
+    if server == 'flask':
+        logging.getLogger(__name__).info("Starting Flask server with config %s", config)
+        app.run(host=config['flask']['host'], port=config['port'],
+                debug=config['flask']['debug'], threaded=True)
+    elif server == 'tornado':
+        from tornado.httpserver import HTTPServer
+        from tornado.ioloop import IOLoop
+        from tornado.log import enable_pretty_logging
+        from tornado.wsgi import WSGIContainer
+
+        enable_pretty_logging()
+        http_server = HTTPServer(WSGIContainer(app))
+        http_server.listen(port=config['port'])
+        IOLoop.current().start()
+    elif server == 'gevent':
+        from gevent.pywsgi import WSGIServer
+
+        WSGIServer(('', config['port']), app).serve_forever()
+    else:
+        raise ValueError(f"Wrong httpserver: {server}")
+
+
 if __name__ == '__main__':
-    if __name__ == '__main__':
-        parser = argparse.ArgumentParser(description='Run "Plznito monitoring" server.')
-        parser.add_argument('--configs', '-c', nargs='*', help='additional config file(s)')
-
-        args = parser.parse_args()
-
-        # load config files, store data in app.config
-        app.config['app'] = {}
-
-        config_default_fn = os.path.join(os.path.dirname(__file__), 'config.json')
-        config_fns = [config_default_fn]
-
-        if args.configs:
-            for fn in args.configs:
-                if not os.path.exists(fn):
-                    raise Exception(f'Config file {fn} not found')
-                config_fns.append(fn)
-
-        for config_fn in config_fns:
-            if os.path.exists(config_fn):
-                with open(config_fn) as fr:
-                    app.config['app'].update(json.load(fr))
-
-        # additional config params
-        app.config['root'] = os.path.join(os.path.dirname(os.path.abspath(__file__)))
-
-        # run server
-        if app.config['app']['httpserver'] == 'flask':
-            print(app.config['app'])
-            app.run(host=app.config['app']['flask']['host'], port=app.config['app']['port'],
-                    debug=app.config['app']['flask']['debug'],
-                    threaded=True)  # , processes=app.config['app']['flask']['processes']
-
-        elif app.config['app']['httpserver'] == 'tornado':
-            from tornado.httpserver import HTTPServer
-            from tornado.ioloop import IOLoop
-            from tornado.log import enable_pretty_logging
-            from tornado.wsgi import WSGIContainer
-
-            enable_pretty_logging()
-            http_server = HTTPServer(WSGIContainer(app))
-            http_server.listen(port=app.config['app']['port'])
-            IOLoop.instance().start()
-        elif app.config['app']['httpserver'] == 'gevent':
-            from gevent.pywsgi import WSGIServer
-
-            http_server = WSGIServer(('', app.config['app']['port']), app)
-            http_server.serve_forever()
-        else:
-            raise Exception(f"Wrong httpserver: {app.config['app']['httpserver']}")
+    main()

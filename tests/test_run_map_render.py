@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from datetime import datetime
 
+import pytest
+
 from plznito_monitoring import run_map_render as map_render
 
 
@@ -213,3 +215,30 @@ class RunMapRenderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+S3_PREFIX = "https://tf-prod-plznito-web.s3.eu-central-1.amazonaws.com/"
+
+
+@pytest.mark.parametrize("photos, expected", [
+    (None, None),
+    ([], None),
+    ([{"thumb": "https://example.org/t.jpg"}], "https://example.org/t.jpg"),
+    ([{"thumb": "javascript:alert(1)"}], None),
+    ([{"thumb": None}], None),
+    (["tickets/1.jpg"], S3_PREFIX + "tickets/1.jpg"),
+    (["  "], None),
+    (["https://example.org/a.jpg", "b.jpg"], "https://example.org/a.jpg"),
+    ([42], None),
+])
+def test_sanitize_photo_url(photos, expected):
+    assert map_render._sanitize_photo_url({"photos": photos}) == expected
+
+
+@pytest.mark.parametrize("value, expected", [
+    # Naive dates are Prague local time: CET in winter, CEST in summer.
+    (datetime(2025, 1, 1, 1, 0), 1735689600),
+    (datetime(2025, 7, 1, 2, 0), 1751328000),
+])
+def test_to_unix_timestamp_uses_prague_time(value, expected):
+    assert map_render._to_unix_timestamp(value) == expected

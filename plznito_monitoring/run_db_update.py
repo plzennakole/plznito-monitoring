@@ -1,16 +1,18 @@
+# Copyright 2026 Plzeň na kole Inc. All rights reserved.
+"""Update the Plznito JSON DB by scraping recent tickets, or rebuild it from snapshots (``--restore``)."""
+
 import argparse
 import bz2
 import json
 import logging
 import os
-import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from plznito_monitoring.cyklo_filter import filter_cyklo_items, to_lower_text
+from plznito_monitoring.common import atomic_write_json, load_json, parse_int
+from plznito_monitoring.cyklo_filter import filter_cyklo_items
 from plznito_monitoring.restore_all import download_one_id
-
-SCRAPER_IMPORT_ERROR = None
 
 logger = logging.getLogger(__name__)
 # Defaults live next to this file, so the scripts work from any working directory.
@@ -23,48 +25,40 @@ LOG_FILE_DEFAULT = str(PLZNITO_DIR / "plznito_monitoring.log")
 SNAPSHOT_DIR_DEFAULT = str(PLZNITO_DIR / "notebooks")
 MAX_CONSECUTIVE_SCRAPE_FAILURES = 10
 
-
-def _load_json_file(file_path):
-    with open(file_path, encoding="utf-8") as fr:
-        return json.load(fr)
+Record = dict[str, Any]
 
 
-def _atomic_write_json(file_path, data, indent=4):
-    target_dir = os.path.dirname(os.path.abspath(file_path))
-    os.makedirs(target_dir, exist_ok=True)
-
-    temp_path = None
-    fd, temp_path = tempfile.mkstemp(prefix=".tmp_json_", suffix=".json", dir=target_dir)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fw:
-            json.dump(data, fw, indent=indent)
-        os.replace(temp_path, file_path)
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
+class InvalidPayloadError(ValueError):
+    """Raised when a DB file or snapshot does not have the expected JSON shape."""
 
 
-def _validate_payload(data):
+class AnchorResolutionError(ValueError):
+    """Raised when no ticket id is known to start the crawl from."""
+
+
+def _validate_payload(data: Any) -> dict[str, list[Any]]:
+    """
+    Check that an update payload is ``{"items": [...]}``.
+
+    :param data: Parsed payload.
+    :raises InvalidPayloadError: If the shape is different.
+    :return: The payload.
+    """
     if not isinstance(data, dict):
-        raise ValueError("Expected payload to be a JSON object.")
+        raise InvalidPayloadError("Expected payload to be a JSON object.")
     if "items" not in data or not isinstance(data["items"], list):
-        raise ValueError("Expected payload to contain 'items' list.")
+        raise InvalidPayloadError("Expected payload to contain 'items' list.")
     return data
 
 
-def _normalize_id(record_id):
-    if isinstance(record_id, bool):
-        return None
-    if isinstance(record_id, int):
-        return record_id
-    if isinstance(record_id, str):
-        stripped = record_id.strip()
-        if stripped.isdigit():
-            return int(stripped)
-    return None
+def _collect_valid_records(records: list[Any], source_name: str) -> list[tuple[int, Record]]:
+    """
+    Pair each record with its integer id, dropping non-dicts and records without a valid id.
 
-
-def _collect_valid_records(records, source_name):
+    :param records: Raw records.
+    :param source_name: Label used in log messages.
+    :return: ``(id, record)`` pairs in input order.
+    """
     valid_records = []
     skipped_invalid = 0
 
@@ -74,7 +68,7 @@ def _collect_valid_records(records, source_name):
             logger.debug("Skipping non-dict record from %s: %r", source_name, record)
             continue
 
-        normalized_id = _normalize_id(record.get("id"))
+        normalized_id = parse_int(record.get("id"))
         if normalized_id is None:
             skipped_invalid += 1
             logger.debug("Skipping record without valid id from %s: %r", source_name, record)
@@ -90,55 +84,60 @@ def _collect_valid_records(records, source_name):
     return valid_records
 
 
-def _save_raw_snapshot(data, out_dirname):
-    target_dir = out_dirname or "."
-    os.makedirs(target_dir, exist_ok=True)
-    snapshot_filename = datetime.today().strftime("%Y-%m-%d-%H:%M:%S") + ".json.bz2"
-    snapshot_path = os.path.join(target_dir, snapshot_filename)
+def _save_raw_snapshot(data: dict[str, list[Any]], out_dirname: str) -> None:
+    """
+    Save the raw update payload as a timestamped ``.json.bz2`` file.
+
+    :param data: Update payload.
+    :param out_dirname: Existing target directory.
+    """
+    snapshot_filename = datetime.today().strftime("%Y%m%dT%H%M%S") + ".json.bz2"
+    snapshot_path = os.path.join(out_dirname or ".", snapshot_filename)
     with bz2.open(snapshot_path, "wt", encoding="utf-8") as f:
         json.dump(data, f, indent=4)
     logger.info("Saved raw update snapshot to %s.", snapshot_path)
 
 
-def _max_record_id(records):
-    max_id = None
-    for record in records:
-        if not isinstance(record, dict):
-            continue
-        normalized_id = _normalize_id(record.get("id"))
-        if normalized_id is None:
-            continue
-        if max_id is None or normalized_id > max_id:
-            max_id = normalized_id
-    return max_id
+def _max_seed_json_id(seed_data_dir: str) -> int | None:
+    """
+    Highest ticket id among ``<id>.json`` files in the seed directory.
 
-
-def _max_seed_json_id(seed_data_dir):
+    :param seed_data_dir: Directory with per-id seed files.
+    :return: Highest id, or ``None`` if the directory is missing or has no such files.
+    """
     if not seed_data_dir:
         return None
     if not os.path.isdir(seed_data_dir):
         logger.warning("Seed data directory %s does not exist.", seed_data_dir)
         return None
 
-    max_seed_id = None
-    for fname in os.listdir(seed_data_dir):
-        if not fname.endswith(".json"):
-            continue
-        fname_base = os.path.splitext(fname)[0]
-        if not fname_base.isdigit():
-            continue
-        file_id = int(fname_base)
-        if max_seed_id is None or file_id > max_seed_id:
-            max_seed_id = file_id
-    return max_seed_id
+    file_ids = [
+        int(stem) for stem, ext in (os.path.splitext(fname) for fname in os.listdir(seed_data_dir))
+        if ext == ".json" and stem.isdigit()
+    ]
+    return max(file_ids, default=None)
 
 
-def _resolve_anchor_id(existing_records, anchor_id=None, seed_data_dir=SEED_DATA_DIR_DEFAULT):
-    db_anchor = _max_record_id(existing_records)
+def _resolve_anchor_id(
+    existing_records: list[Any],
+    anchor_id: int | None = None,
+    seed_data_dir: str = SEED_DATA_DIR_DEFAULT,
+) -> tuple[int, str]:
+    """
+    Pick the ticket id to crawl around: the DB's highest id, else the CLI value, else the seed directory.
+
+    :param existing_records: Records already in the DB.
+    :param anchor_id: Anchor given on the command line.
+    :param seed_data_dir: Directory with per-id seed files.
+    :raises AnchorResolutionError: If none of the sources gives an id.
+    :return: ``(anchor id, source name)``.
+    """
+    db_anchor = max((record_id for record_id, _ in _collect_valid_records(existing_records, "existing DB")),
+                    default=None)
     if db_anchor is not None:
         return db_anchor, "db"
 
-    cli_anchor = _normalize_id(anchor_id)
+    cli_anchor = parse_int(anchor_id)
     if cli_anchor is not None:
         return cli_anchor, "cli"
 
@@ -146,13 +145,26 @@ def _resolve_anchor_id(existing_records, anchor_id=None, seed_data_dir=SEED_DATA
     if seed_anchor is not None:
         return seed_anchor, f"seed:{seed_data_dir}"
 
-    raise ValueError(
+    raise AnchorResolutionError(
         "Unable to resolve crawl anchor id. Provide --anchor-id or place numeric *.json files "
         f"in {seed_data_dir}."
     )
 
 
-def _resolve_crawl_range(anchor_id, id_window_back=ID_WINDOW_BACK_DEFAULT, id_lookahead=ID_LOOKAHEAD_DEFAULT):
+def _resolve_crawl_range(
+    anchor_id: int,
+    id_window_back: int = ID_WINDOW_BACK_DEFAULT,
+    id_lookahead: int = ID_LOOKAHEAD_DEFAULT,
+) -> tuple[int, int]:
+    """
+    Inclusive id range to crawl around the anchor.
+
+    :param anchor_id: Anchor ticket id.
+    :param id_window_back: How many ids before the anchor to re-check (status updates).
+    :param id_lookahead: How many ids after the anchor to try (new tickets).
+    :raises ValueError: If the anchor is ``None`` or a window is negative.
+    :return: ``(start id, end id)``, start at least 1.
+    """
     if anchor_id is None:
         raise ValueError("anchor_id must not be None.")
     if id_window_back < 0:
@@ -165,7 +177,13 @@ def _resolve_crawl_range(anchor_id, id_window_back=ID_WINDOW_BACK_DEFAULT, id_lo
     return start_id, end_id
 
 
-def _extract_item(scraper_output):
+def _extract_item(scraper_output: Any) -> Record | None:
+    """
+    Return the non-empty ``item`` of a scraper result.
+
+    :param scraper_output: Result of :func:`download_one_id`.
+    :return: The item, or ``None`` for failed or empty scrapes.
+    """
     if not isinstance(scraper_output, dict):
         return None
     item = scraper_output.get("item")
@@ -175,18 +193,24 @@ def _extract_item(scraper_output):
 
 
 def get_plznito_current_data(
-    existing_records,
-    anchor_id=None,
-    id_window_back=ID_WINDOW_BACK_DEFAULT,
-    id_lookahead=ID_LOOKAHEAD_DEFAULT,
-    seed_data_dir=SEED_DATA_DIR_DEFAULT,
-):
+    existing_records: list[Any],
+    anchor_id: int | None = None,
+    id_window_back: int = ID_WINDOW_BACK_DEFAULT,
+    id_lookahead: int = ID_LOOKAHEAD_DEFAULT,
+    seed_data_dir: str = SEED_DATA_DIR_DEFAULT,
+) -> dict[str, list[Any]]:
     """
-    Build current update payload by scraping web map ticket detail pages.
-    """
-    if download_one_id is None:  # pragma: no cover - environment dependent
-        raise RuntimeError(f"Web scraper unavailable: {SCRAPER_IMPORT_ERROR}")
+    Scrape the web map detail pages of tickets around the anchor id.
 
+    The crawl stops early after :data:`MAX_CONSECUTIVE_SCRAPE_FAILURES` empty results in a row.
+
+    :param existing_records: Records already in the DB (used to find the anchor).
+    :param anchor_id: Fallback anchor if the DB is empty.
+    :param id_window_back: How many ids before the anchor to re-check.
+    :param id_lookahead: How many ids after the anchor to try.
+    :param seed_data_dir: Last-resort anchor source.
+    :return: Update payload ``{"items": [...]}``.
+    """
     resolved_anchor, anchor_source = _resolve_anchor_id(
         existing_records,
         anchor_id=anchor_id,
@@ -204,22 +228,7 @@ def get_plznito_current_data(
     scanned_count = 0
     for ticket_id in range(start_id, end_id + 1):
         scanned_count += 1
-        try:
-            scraped_data = download_one_id(ticket_id, source="web")
-        except Exception as exc:  # pragma: no cover - network/runtime dependent
-            logger.warning("Web scrape failed for id %s: %s", ticket_id, exc)
-            empty_items += 1
-            consecutive_failures += 1
-            if consecutive_failures >= MAX_CONSECUTIVE_SCRAPE_FAILURES:
-                logger.warning(
-                    "Stopping crawl after %d consecutive failures at id %d.",
-                    consecutive_failures,
-                    ticket_id,
-                )
-                break
-            continue
-
-        item = _extract_item(scraped_data)
+        item = _extract_item(download_one_id(ticket_id, source="web"))
         if item is None:
             empty_items += 1
             consecutive_failures += 1
@@ -235,7 +244,6 @@ def get_plznito_current_data(
         items.append(item)
         consecutive_failures = 0
 
-    payload = _validate_payload({"items": items})
     logger.info(
         "Downloaded current plznito payload via web scraping (anchor=%s, source=%s, range=%d-%d, "
         "scanned=%d, items=%d, empty=%d).",
@@ -247,77 +255,69 @@ def get_plznito_current_data(
         len(items),
         empty_items,
     )
-    return payload
+    return {"items": items}
 
 
-def _load_db_records(json_db_file_path):
-    if not os.path.exists(json_db_file_path):
-        logger.warning("DB file %s does not exist. Initializing with empty list.", json_db_file_path)
+def _load_record_list(path: str | None, missing_ok_label: str) -> list[Any]:
+    """
+    Load a JSON list of records; a missing (or unset) file gives an empty list.
+
+    :param path: File path, or ``None``.
+    :param missing_ok_label: Label used in the warning for a missing file.
+    :raises InvalidPayloadError: If the file does not contain a JSON list.
+    :return: Records.
+    """
+    if path is None:
         return []
+    if not os.path.exists(path):
+        logger.warning("%s %s does not exist. Starting with empty list.", missing_ok_label, path)
+        return []
+    data = load_json(path)
+    if not isinstance(data, list):
+        raise InvalidPayloadError(f"{missing_ok_label} {path} must contain a JSON list.")
+    return data
 
-    data_db = _load_json_file(json_db_file_path)
-    if not isinstance(data_db, list):
-        raise ValueError(f"DB file {json_db_file_path} must contain a JSON list.")
-    return data_db
 
+def _load_snapshot_payload(full_fname: str) -> Any:
+    """
+    Load a ``.json`` or ``.json.bz2`` snapshot.
 
-def _load_snapshot_payload(full_fname):
+    :param full_fname: Snapshot path.
+    :return: Parsed JSON, or ``None`` for other file types.
+    """
     if full_fname.endswith(".json"):
-        return _load_json_file(full_fname)
+        return load_json(full_fname)
     if full_fname.endswith(".bz2"):
         with bz2.open(full_fname, "rt", encoding="utf-8") as fr:
             return json.load(fr)
     return None
 
 
-def _restore_seed_data(start_json_name):
-    if start_json_name is None:
-        return []
-    if not os.path.exists(start_json_name):
-        logger.warning("Restore seed file %s does not exist. Starting with empty DB.", start_json_name)
-        return []
-    data = _load_json_file(start_json_name)
-    if not isinstance(data, list):
-        raise ValueError(f"Restore seed file {start_json_name} must contain a JSON list.")
-    return data
-
-
-def filter_data(data):
+def filter_data(data: dict[str, list[Any]]) -> list[Record]:
     """
-    Simple filtering of cycling items
+    Keep only the cycling-related items of an update payload.
+
+    :param data: Update payload ``{"items": [...]}``.
+    :raises InvalidPayloadError: If the payload has a different shape.
+    :return: Cycling items.
     """
-    payload = _validate_payload(data)
-    items = payload["items"]
+    items = _validate_payload(data)["items"]
     data_cyklo = filter_cyklo_items(items)
-    skipped_missing_text = 0
-    for item in items:
-        if not isinstance(item, dict):
-            skipped_missing_text += 1
-            logger.debug("Skipping non-dict item in filter_data: %r", item)
-            continue
-
-        report_text = to_lower_text(item.get("report"))
-        name_text = to_lower_text(item.get("name"))
-        if not report_text and not name_text:
-            skipped_missing_text += 1
-            logger.debug("Skipping item without report/name text. id=%s", item.get("id"))
-
-    logger.info(
-        "Filtered cycling items: %d/%d (skipped_missing_text=%d).",
-        len(data_cyklo),
-        len(items),
-        skipped_missing_text,
-    )
+    logger.info("Filtered cycling items: %d/%d.", len(data_cyklo), len(items))
     return data_cyklo
 
 
-def merge_data(data_old, data_new):
+def merge_data(data_old: list[Any], data_new: list[Any]) -> list[Record]:
     """
     Merge new records into old ones by id.
 
     New non-empty fields overwrite old ones, other old fields are kept, so a lightweight
     scraped record does not wipe ``created``, ``category_id`` etc. of a full API record.
     Updated and new records move to the end, later duplicates win.
+
+    :param data_old: Records in the DB.
+    :param data_new: Incoming records.
+    :return: Merged records.
     """
     valid_old = _collect_valid_records(data_old, "existing DB")
     valid_new = _collect_valid_records(data_new, "incoming update")
@@ -340,23 +340,38 @@ def merge_data(data_old, data_new):
     return data_out
 
 
-def _snapshot_items(payload):
+def _snapshot_items(payload: Any) -> list[Any]:
     """
-    Return the records of a snapshot: ``{"items": [...]}`` (update snapshots, old seed files)
+    Records of a snapshot: ``{"items": [...]}`` (update snapshots, old seed files)
     or ``{"item": {...}}`` (per-id seed files).
+
+    :param payload: Parsed snapshot.
+    :raises InvalidPayloadError: For any other shape, including empty ``item``.
+    :return: Records.
     """
     if isinstance(payload, dict) and isinstance(payload.get("items"), list):
-        return payload["items"]
+        items: list[Any] = payload["items"]
+        return items
     if isinstance(payload, dict) and isinstance(payload.get("item"), dict) and payload["item"]:
         return [payload["item"]]
-    raise ValueError("Expected snapshot with 'items' list or non-empty 'item' object.")
+    raise InvalidPayloadError("Expected snapshot with 'items' list or non-empty 'item' object.")
 
 
-def db_restore(out_json_name, start_json_name=None, data_dirname=".", filter_cyklo=True):
+def db_restore(
+    out_json_name: str,
+    start_json_name: str | None = None,
+    data_dirname: str = ".",
+    filter_cyklo: bool = True,
+) -> None:
     """
     Rebuild the DB from a seed DB file plus all snapshots in ``data_dirname``.
+
+    :param out_json_name: Output DB path.
+    :param start_json_name: Optional existing DB to start from.
+    :param data_dirname: Directory with ``.json`` / ``.json.bz2`` snapshots, applied in name order.
+    :param filter_cyklo: Keep only cycling-related records.
     """
-    data = _restore_seed_data(start_json_name)
+    data = _load_record_list(start_json_name, "Restore seed file")
 
     items = []
     skipped = 0
@@ -377,28 +392,36 @@ def db_restore(out_json_name, start_json_name=None, data_dirname=".", filter_cyk
         items = filter_cyklo_items(items)
     data = merge_data(data, items)
 
-    _atomic_write_json(out_json_name, data, indent=4)
+    atomic_write_json(out_json_name, data)
     logger.info("Restore completed: wrote %d items to %s.", len(data), out_json_name)
 
 
 def db_update(
-    json_db_file_path,
-    out_dirname="",
-    filter_cyklo=True,
-    save_update_data=False,
-    write_cyklo_json_path=None,
-    anchor_id=None,
-    id_window_back=ID_WINDOW_BACK_DEFAULT,
-    id_lookahead=ID_LOOKAHEAD_DEFAULT,
-    seed_data_dir=SEED_DATA_DIR_DEFAULT,
-):
+    json_db_file_path: str,
+    out_dirname: str = "",
+    filter_cyklo: bool = True,
+    save_update_data: bool = False,
+    write_cyklo_json_path: str | None = None,
+    anchor_id: int | None = None,
+    id_window_back: int = ID_WINDOW_BACK_DEFAULT,
+    id_lookahead: int = ID_LOOKAHEAD_DEFAULT,
+    seed_data_dir: str = SEED_DATA_DIR_DEFAULT,
+) -> None:
     """
-    update with daily data
-    """
-    # add data to our db
-    data_db = _load_db_records(json_db_file_path)
+    Scrape recent tickets and merge them into the JSON DB.
 
-    # load new data
+    :param json_db_file_path: DB file to update (created if missing).
+    :param out_dirname: Directory for the raw snapshot (``save_update_data``).
+    :param filter_cyklo: Store only cycling-related tickets in the DB.
+    :param save_update_data: Also save the raw scraped payload.
+    :param write_cyklo_json_path: Also write the cycling subset to this path.
+    :param anchor_id: Fallback crawl anchor for an empty DB.
+    :param id_window_back: How many ids before the anchor to re-check.
+    :param id_lookahead: How many ids after the anchor to try.
+    :param seed_data_dir: Last-resort anchor source.
+    """
+    data_db = _load_record_list(json_db_file_path, "DB file")
+
     data_current = get_plznito_current_data(
         data_db,
         anchor_id=anchor_id,
@@ -411,18 +434,17 @@ def db_update(
         _save_raw_snapshot(data_current, out_dirname)
 
     if filter_cyklo:
-        data_cyklo_current = filter_data(data_current)
-        data_cyklo_updated = merge_data(data_db, data_cyklo_current)
-        _atomic_write_json(json_db_file_path, data_cyklo_updated, indent=4)
+        data_cyklo_updated = merge_data(data_db, filter_data(data_current))
+        atomic_write_json(json_db_file_path, data_cyklo_updated)
         if write_cyklo_json_path:
-            _atomic_write_json(write_cyklo_json_path, data_cyklo_updated, indent=4)
+            atomic_write_json(write_cyklo_json_path, data_cyklo_updated)
             logger.info("Wrote derived cycling DB to %s.", write_cyklo_json_path)
     else:
         data_updated = merge_data(data_db, data_current["items"])
-        _atomic_write_json(json_db_file_path, data_updated, indent=4)
+        atomic_write_json(json_db_file_path, data_updated)
         if write_cyklo_json_path:
             data_cyklo_updated = filter_cyklo_items(data_updated)
-            _atomic_write_json(write_cyklo_json_path, data_cyklo_updated, indent=4)
+            atomic_write_json(write_cyklo_json_path, data_cyklo_updated)
             logger.info(
                 "Wrote derived cycling DB to %s (%d items).",
                 write_cyklo_json_path,
@@ -432,8 +454,8 @@ def db_update(
     logger.info("Merging finished. Output file: %s", json_db_file_path)
 
 
-if __name__ == "__main__":
-
+def main() -> None:
+    """Command line entry point."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--db_json", type=str, default=str(PLZNITO_DIR / CYKLO_DB_FILENAME))
     parser.add_argument("--filter_cyklo", dest="filter_cyklo", action="store_true")
@@ -452,7 +474,7 @@ if __name__ == "__main__":
                         level=logging.INFO,
                         format='%(asctime)s %(message)s')
 
-    logger.info(f"Running with args: {args}")
+    logger.info("Running with args: %s", args)
 
     if args.filter_cyklo is None:
         filter_cyklo = os.path.basename(args.db_json) == CYKLO_DB_FILENAME
@@ -463,8 +485,10 @@ if __name__ == "__main__":
         restore_seed = args.db_json if os.path.exists(args.db_json) else None
         db_restore(args.db_json, start_json_name=restore_seed, data_dirname=args.seed_data_dir,
                    filter_cyklo=filter_cyklo)
-        raise SystemExit(0)
+        return
 
+    if args.save_update_data:
+        os.makedirs(SNAPSHOT_DIR_DEFAULT, exist_ok=True)
     db_update(
         args.db_json,
         out_dirname=SNAPSHOT_DIR_DEFAULT,
@@ -476,3 +500,7 @@ if __name__ == "__main__":
         id_lookahead=args.id_lookahead,
         seed_data_dir=args.seed_data_dir,
     )
+
+
+if __name__ == "__main__":
+    main()

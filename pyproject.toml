@@ -28,7 +28,7 @@ ignore_missing_imports = true
 
 # Fully typed modules; extend this list as modules get type hints.
 [[tool.mypy.overrides]]
-module = ["app.plznito_api", "app.plznito_store"]
+module = ["app.plznito_api", "app.plznito_store", "plznito_monitoring.*"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 warn_return_any = true

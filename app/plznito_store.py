@@ -9,25 +9,15 @@ import pathlib
 import threading
 from collections import Counter
 from typing import Any
-from zoneinfo import ZoneInfo
 
-from plznito_monitoring import cyklo_filter
-from plznito_monitoring import run_map_render as map_render
+from plznito_monitoring.common import PLZNITO_TZ, parse_int, status_label
+from plznito_monitoring.cyklo_filter import is_cyklo_item
+from plznito_monitoring.run_map_render import normalize_item
 
 logger = logging.getLogger(__name__)
 
 _PLZNITO_DIR = pathlib.Path(__file__).parent.parent / 'plznito_monitoring'
 DEFAULT_DB_PATH = _PLZNITO_DIR / 'plznito_all.json'
-PLZNITO_TZ = ZoneInfo('Europe/Prague')
-# One label per status id; raw records mix API ids with scraped texts ("Zodpovězené", ...).
-STATUS_LABELS = {
-    1: "Nové",
-    2: "V řešení",
-    3: "Vyřešeno",
-    4: "Odmítnuto",
-    5: "Nepatří městu",
-    6: "Odpovězeno",
-}
 
 
 class IssueNotFoundError(Exception):
@@ -51,10 +41,10 @@ def to_api_issue(item: dict[str, Any]) -> dict[str, Any] | None:
     :param item: Raw record as stored in the JSON DB.
     :return: API issue dict, or ``None`` if the record lacks id, status, date or coordinates.
     """
-    normalized, _skip_reason = map_render._normalize_item(item)
+    normalized, _skip_reason = normalize_item(item)
     if normalized is None:
         return None
-    issue_id = map_render._parse_optional_int(normalized['id'])
+    issue_id = parse_int(normalized['id'])
     if issue_id is None:
         return None
 
@@ -66,7 +56,7 @@ def to_api_issue(item: dict[str, Any]) -> dict[str, Any] | None:
         'description': normalized['description'] or '',
         'solution': normalized['solution'] or '',
         'status_id': status_id,
-        'status_label': STATUS_LABELS.get(status_id, f"Stav {status_id}"),
+        'status_label': status_label(status_id),
         'category_id': normalized['category_id'],
         'category_label': normalized['category_label'],
         'created': normalized['date_obj'].replace(tzinfo=PLZNITO_TZ),
@@ -74,7 +64,7 @@ def to_api_issue(item: dict[str, Any]) -> dict[str, Any] | None:
         'longitude': normalized['longitude'],
         'address': (address.strip() or None) if isinstance(address, str) else None,
         'photo_url': normalized['photo_url'],
-        'is_cyklo': cyklo_filter.is_cyklo_item(item),
+        'is_cyklo': is_cyklo_item(item),
         'ticket_url': f"https://www.plznito.cz/map/{issue_id}",
     }
 

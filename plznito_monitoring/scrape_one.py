@@ -1,10 +1,14 @@
+# Copyright 2026 Plzeň na kole Inc. All rights reserved.
+"""Download one Plznito ticket and print it as JSON (debugging helper)."""
+
 import argparse
 import json
 
 from plznito_monitoring.restore_all import download_one_id
 
 
-def main():
+def main() -> None:
+    """Command line entry point."""
     parser = argparse.ArgumentParser()
     parser.add_argument("id", type=int)
     parser.add_argument("--source", type=str, default="auto", choices=["auto", "api", "web"])
@@ -18,4 +22,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

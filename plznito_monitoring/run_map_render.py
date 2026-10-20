@@ -1,14 +1,17 @@
+# Copyright 2026 Plzeň na kole Inc. All rights reserved.
+"""Render Plznito tickets into a self-contained Leaflet map HTML page."""
+
 import argparse
 import datetime
 import json
 import logging
-import os
 import re
-import tempfile
 from collections import Counter
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
-from zoneinfo import ZoneInfo
+
+from plznito_monitoring.common import PLZNITO_TZ, STATUS_LABELS, atomic_open, load_json, parse_int, status_label
 
 logger = logging.getLogger(__name__)
 PLZNITO_DIR = Path(__file__).parent
@@ -19,8 +22,6 @@ DATE_FORMATS = (
     "%Y-%m-%d %H:%M:%S",
     "%d.%m.%Y",
 )
-# Ticket dates are naive Prague local times.
-PLZNITO_TZ = ZoneInfo("Europe/Prague")
 DEFAULT_CENTER = [49.7443392, 13.3766164]
 DEFAULT_ZOOM = 13
 DEFAULT_TIME_FILTER = "last_30_days"
@@ -29,14 +30,17 @@ STATUS_COLOR_MAP = {
     3: "green",
     6: "lightgreen",
 }
-STATUS_LABEL_MAP = {
-    2: "V řešení",
-    3: "Vyřešeno",
-    6: "Odpovězeno",
-}
+
+Record = dict[str, Any]
 
 
-def _parse_date_value(value):
+def _parse_date_value(value: Any) -> datetime.datetime | None:
+    """
+    Parse a ticket date in one of :data:`DATE_FORMATS`.
+
+    :param value: Raw date value.
+    :return: Naive datetime (Prague local time), or ``None`` if it does not parse.
+    """
     if value is None:
         return None
     text_value = str(value).strip()
@@ -50,7 +54,13 @@ def _parse_date_value(value):
     return None
 
 
-def _parse_item_datetime(item):
+def _parse_item_datetime(item: Record) -> tuple[datetime.datetime | None, str | None]:
+    """
+    Creation time of a record: ``created.date`` (API shape), else ``date`` (scraped shape).
+
+    :param item: Raw record.
+    :return: ``(datetime, original text)``, or ``(None, None)``.
+    """
     date_candidates = []
     created = item.get("created")
     if isinstance(created, dict):
@@ -64,7 +74,13 @@ def _parse_item_datetime(item):
     return None, None
 
 
-def _parse_coordinate(value):
+def _parse_coordinate(value: Any) -> float | None:
+    """
+    Parse a latitude/longitude value (number or numeric string).
+
+    :param value: Raw value.
+    :return: Float, or ``None`` for empty, ``"None"`` and non-numeric values.
+    """
     if value is None:
         return None
     if isinstance(value, str):
@@ -78,23 +94,13 @@ def _parse_coordinate(value):
         return None
 
 
-def _parse_optional_int(value):
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        stripped = value.strip()
-        if stripped.isdigit():
-            return int(stripped)
-    return None
+def _extract_optional_label(value: Any) -> str | None:
+    """
+    Non-empty label from a string or a ``{"name"|"title"|"label": ...}`` dict.
 
-
-def _parse_status_id(value):
-    return _parse_optional_int(value)
-
-
-def _extract_optional_label(value):
+    :param value: Raw value.
+    :return: Stripped label, or ``None``.
+    """
     if isinstance(value, str):
         stripped = value.strip()
         if stripped:
@@ -111,14 +117,14 @@ def _extract_optional_label(value):
     return None
 
 
-def _status_label_for_filter(status_id):
-    label = STATUS_LABEL_MAP.get(status_id)
-    if label:
-        return label
-    return f"Stav {status_id}"
+def _resolve_category_filter(category_id: int | None, category_value: Any) -> tuple[str, str]:
+    """
+    Filter key and label of a ticket category.
 
-
-def _resolve_category_filter(category_id, category_value):
+    :param category_id: Category id (API shape).
+    :param category_value: Category name or object (scraped shape).
+    :return: ``(key, label)``, e.g. ``("id:4", "Kategorie 4")`` or ``("name:Zeleň", "Zeleň")``.
+    """
     if category_id is not None:
         return f"id:{category_id}", f"Kategorie {category_id}"
 
@@ -129,13 +135,25 @@ def _resolve_category_filter(category_id, category_value):
     return "unknown", "Neznámá kategorie"
 
 
-def _to_unix_timestamp(value):
+def _to_unix_timestamp(value: datetime.datetime) -> int:
+    """
+    Unix timestamp; naive values are taken as Prague local time.
+
+    :param value: Datetime.
+    :return: Seconds since the epoch.
+    """
     if value.tzinfo is None:
         return int(value.replace(tzinfo=PLZNITO_TZ).timestamp())
     return int(value.astimezone(datetime.UTC).timestamp())
 
 
-def _sanitize_photo_url(item):
+def _sanitize_photo_url(item: Record) -> str | None:
+    """
+    URL of the first photo: an absolute ``thumb`` URL (API shape) or an S3 path (scraped shape).
+
+    :param item: Raw record.
+    :return: Absolute http(s) URL, or ``None``.
+    """
     photos = item.get("photos")
     if not isinstance(photos, list) or not photos:
         return None
@@ -163,7 +181,14 @@ def _sanitize_photo_url(item):
     return None
 
 
-def _normalize_item(item):
+def normalize_item(item: Any) -> tuple[Record | None, str | None]:
+    """
+    Normalise a raw record (API or scraped shape) into the fields used by the map and the API.
+
+    :param item: Raw record.
+    :return: ``(normalized record, None)``, or ``(None, skip reason)`` for records without id,
+        status, valid date or coordinates.
+    """
     if not isinstance(item, dict):
         return None, "missing_required_fields"
 
@@ -171,7 +196,7 @@ def _normalize_item(item):
     if item_id is None:
         return None, "missing_required_fields"
 
-    status_id = _parse_status_id(item.get("status_id"))
+    status_id = parse_int(item.get("status_id"))
     if status_id is None:
         return None, "missing_required_fields"
 
@@ -184,7 +209,7 @@ def _normalize_item(item):
     if latitude is None or longitude is None:
         return None, "invalid_coordinates"
 
-    category_id = _parse_optional_int(item.get("category_id"))
+    category_id = parse_int(item.get("category_id"))
     category_key, category_label = _resolve_category_filter(category_id, item.get("category"))
 
     normalized = {
@@ -205,7 +230,13 @@ def _normalize_item(item):
     return normalized, None
 
 
-def _item_id_for_skip(item):
+def _item_id_for_skip(item: Any) -> str | None:
+    """
+    Id of a skipped record for the skip report.
+
+    :param item: Raw record.
+    :return: Id as text, or ``None``.
+    """
     if not isinstance(item, dict):
         return None
     item_id = item.get("id")
@@ -214,12 +245,19 @@ def _item_id_for_skip(item):
     return str(item_id)
 
 
-def _serialize_marker(item, popup_mode):
+def _serialize_marker(item: Record, popup_mode: str) -> Record:
+    """
+    Marker data for the page script.
+
+    :param item: Normalised record.
+    :param popup_mode: ``"compact"`` or ``"full"`` (adds description, solution and photo).
+    :return: Marker dict.
+    """
     ticket_id = str(item["id"])
     marker_data = {
         "id": ticket_id,
         "status_id": item["status_id"],
-        "status_label": _status_label_for_filter(item["status_id"]),
+        "status_label": status_label(item["status_id"]),
         "category_key": item["category_key"],
         "category_label": item["category_label"],
         "name": "" if item["name"] is None else str(item["name"]),
@@ -239,12 +277,24 @@ def _serialize_marker(item, popup_mode):
     return marker_data
 
 
-def _status_option_sort_key(option):
+def _status_option_sort_key(option: dict[str, str]) -> int:
+    """
+    Sort statuses numerically, non-numeric keys last.
+
+    :param option: ``{"key", "label"}`` option.
+    :return: Sort key.
+    """
     key = option["key"]
     return int(key) if key.isdigit() else 10**9
 
 
-def _category_option_sort_key(option):
+def _category_option_sort_key(option: dict[str, str]) -> tuple[int, int | str]:
+    """
+    Sort categories: by id first, then by name, unknown last.
+
+    :param option: ``{"key", "label"}`` option.
+    :return: Sort key.
+    """
     key = option["key"]
     if key.startswith("id:"):
         category_id = key.split(":", 1)[1]
@@ -256,7 +306,20 @@ def _category_option_sort_key(option):
     return 2, option["label"].lower()
 
 
-def serialize_map_data(data_current, popup_mode="compact", now=None):
+def serialize_map_data(
+    data_current: list[Any],
+    popup_mode: str = "compact",
+    now: datetime.datetime | None = None,
+) -> dict[str, Any]:
+    """
+    Turn raw records into the data embedded in the map page.
+
+    :param data_current: Raw records.
+    :param popup_mode: ``"compact"`` or ``"full"``.
+    :param now: Reference time for the "recent" layers (naive Prague time); defaults to now.
+    :raises ValueError: For an unknown ``popup_mode``.
+    :return: Markers, layers, filter options, skip report and stats.
+    """
     if popup_mode not in {"compact", "full"}:
         raise ValueError("popup_mode must be 'compact' or 'full'.")
 
@@ -266,7 +329,7 @@ def serialize_map_data(data_current, popup_mode="compact", now=None):
 
     recent_cutoff_7 = now - datetime.timedelta(days=7)
     recent_cutoff_30 = now - datetime.timedelta(days=30)
-    stats = Counter()
+    stats: Counter[str] = Counter()
     markers = []
     skipped = []
     years = set()
@@ -276,8 +339,8 @@ def serialize_map_data(data_current, popup_mode="compact", now=None):
     for item in data_current:
         stats["input_records"] += 1
 
-        normalized_item, error_reason = _normalize_item(item)
-        if error_reason is not None:
+        normalized_item, error_reason = normalize_item(item)
+        if normalized_item is None:
             stats[f"skipped_{error_reason}"] += 1
             skipped.append({"id": _item_id_for_skip(item), "reason": error_reason})
             logger.debug("Skipping record due to %s: %r", error_reason, item)
@@ -330,15 +393,27 @@ def serialize_map_data(data_current, popup_mode="compact", now=None):
     }
 
 
-def _json_for_inline_script(data):
+def _json_for_inline_script(data: Any) -> str:
+    """
+    JSON safe to embed in a ``<script>`` block.
+
+    :param data: JSON-serialisable value.
+    :return: Compact JSON with ``</`` escaped.
+    """
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
 
 
-def _minify_html(html_text):
-    block_pattern = re.compile(r"(?is)<(script|style|pre|textarea)\b.*?</\1>")
-    preserved_blocks = []
+def _minify_html(html_text: str) -> str:
+    """
+    Drop comments and whitespace between tags; ``script``/``style``/``pre``/``textarea`` stay untouched.
 
-    def _preserve_block(match):
+    :param html_text: Page HTML.
+    :return: Minified HTML.
+    """
+    block_pattern = re.compile(r"(?is)<(script|style|pre|textarea)\b.*?</\1>")
+    preserved_blocks: list[str] = []
+
+    def _preserve_block(match: re.Match[str]) -> str:
         block_id = len(preserved_blocks)
         preserved_blocks.append(match.group(0))
         return f"__HTML_MINIFY_BLOCK_{block_id}__"
@@ -354,14 +429,21 @@ def _minify_html(html_text):
     return minified
 
 
-def _build_map_html(serialized_data, cluster=False):
+def _build_map_html(serialized_data: dict[str, Any], cluster: bool = False) -> str:
+    """
+    Fill the page template.
+
+    :param serialized_data: Output of :func:`serialize_map_data`.
+    :param cluster: Cluster markers.
+    :return: Page HTML.
+    """
     markers_json = _json_for_inline_script(serialized_data["markers"])
     years_json = _json_for_inline_script(serialized_data["years"])
     status_options_json = _json_for_inline_script(serialized_data["status_options"])
     category_options_json = _json_for_inline_script(serialized_data["category_options"])
     popup_mode_json = _json_for_inline_script(serialized_data["popup_mode"])
     status_colors_json = _json_for_inline_script({str(key): value for key, value in STATUS_COLOR_MAP.items()})
-    status_labels_json = _json_for_inline_script({str(key): value for key, value in STATUS_LABEL_MAP.items()})
+    status_labels_json = _json_for_inline_script({str(key): value for key, value in STATUS_LABELS.items()})
     generated_ts_json = _json_for_inline_script(serialized_data["generated_ts"])
     use_cluster = "true" if cluster else "false"
 
@@ -736,7 +818,15 @@ def _build_map_html(serialized_data, cluster=False):
 """
 
 
-def get_map(data_current, cluster=False, popup_mode="compact"):
+def get_map(data_current: list[Any], cluster: bool = False, popup_mode: str = "compact") -> str:
+    """
+    Build the map page and log a processing summary.
+
+    :param data_current: Raw records.
+    :param cluster: Cluster markers.
+    :param popup_mode: ``"compact"`` or ``"full"``.
+    :return: Page HTML.
+    """
     serialized_data = serialize_map_data(data_current, popup_mode=popup_mode)
     stats = serialized_data["stats"]
 
@@ -760,12 +850,20 @@ def get_map(data_current, cluster=False, popup_mode="compact"):
     return _build_map_html(serialized_data, cluster=cluster)
 
 
-def render_map_to_file(file_in=str(PLZNITO_DIR / "plznito_cyklo.json"),
-                       file_out=str(PLZNITO_DIR / "templates" / "plznito_map.html"),
-                       cluster=False, popup_mode="compact"):
+def render_map_to_file(file_in: str = str(PLZNITO_DIR / "plznito_cyklo.json"),
+                       file_out: str = str(PLZNITO_DIR / "templates" / "plznito_map.html"),
+                       cluster: bool = False, popup_mode: str = "compact") -> None:
+    """
+    Render a JSON DB file into a map page, written atomically.
+
+    :param file_in: JSON list of records, or ``{"items": [...]}``.
+    :param file_out: Output HTML path.
+    :param cluster: Cluster markers.
+    :param popup_mode: ``"compact"`` or ``"full"``.
+    :raises ValueError: If the input has another shape.
+    """
     logger.info("Loading data from %s", file_in)
-    with open(file_in, encoding="utf-8") as fr:
-        data = json.load(fr)
+    data = load_json(file_in)
 
     if isinstance(data, dict) and isinstance(data.get("items"), list):
         data_records = data["items"]
@@ -778,24 +876,13 @@ def render_map_to_file(file_in=str(PLZNITO_DIR / "plznito_cyklo.json"),
     map_html = get_map(data_records, cluster=cluster, popup_mode=popup_mode)
     map_html = _minify_html(map_html)
 
-    target_dir = os.path.dirname(os.path.abspath(file_out))
-    os.makedirs(target_dir, exist_ok=True)
-
-    temp_path = None
-    fd, temp_path = tempfile.mkstemp(prefix=".tmp_map_", suffix=".html", dir=target_dir)
-    os.close(fd)
-    try:
-        with open(temp_path, "w", encoding="utf-8") as fw:
-            fw.write(map_html)
-        os.replace(temp_path, file_out)
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
+    with atomic_open(file_out) as fw:
+        fw.write(map_html)
     logger.info("Saved map to %s", file_out)
 
 
-if __name__ == '__main__':
-
+def main() -> None:
+    """Command line entry point."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--log_level", type=str, default="INFO",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
@@ -812,3 +899,7 @@ if __name__ == '__main__':
     logger.setLevel(log_level)
 
     render_map_to_file(args.file_in, args.file_out, cluster=args.cluster_style, popup_mode=args.popup_mode)
+
+
+if __name__ == "__main__":
+    main()
