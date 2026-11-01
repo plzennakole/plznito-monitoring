@@ -22,9 +22,10 @@ run_step() {
     fi
 }
 
-# One backup a day, one file per weekday: a rolling week of copies without any cleanup.
+# One gzipped backup a day, one file per weekday: a rolling week of copies without any cleanup.
+# Gzip keeps the week at ~150 MB instead of ~1.2 GB for plain copies of the ~175 MB DB.
 BACKUP_DIR="$DIR/backups"
-BACKUP="$BACKUP_DIR/plznito-$(date +%u).db"
+BACKUP="$BACKUP_DIR/plznito-$(date +%u).db.gz"
 mkdir -p "$BACKUP_DIR"
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') INFO job: start" >> "$LOG"

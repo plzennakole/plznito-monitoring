@@ -1,4 +1,5 @@
 import contextlib
+import gzip
 import json
 import os
 import unittest
@@ -319,6 +320,23 @@ def test_import_export_and_backup_round_trip(tmp_path):
     exported = json.loads((tmp_path / "export.json").read_text(encoding="utf-8"))
     assert exported == sorted(records, key=lambda record: record["id"])
     assert _runs(db_path) == [(1, {"mode": "import", "new": 2, "updated": 0, "unchanged": 0})]
+
+
+def test_gzipped_backup_restores_to_the_same_records(tmp_path):
+    db_path = str(tmp_path / "plznito.db")
+    with contextlib.closing(db.connect(db_path)) as conn:
+        db.upsert_records(conn, [{"id": 1, "name": "Cyklo pruh"}])
+    backup_path = tmp_path / "plznito-3.db.gz"
+    backup_path.write_bytes(b"old backup")
+
+    db_update.db_backup(db_path, str(backup_path))
+
+    restored = tmp_path / "restored.db"
+    with gzip.open(backup_path, "rb") as fr:
+        restored.write_bytes(fr.read())
+    with contextlib.closing(db.connect(restored, create=False)) as conn:
+        assert db.load_records(conn) == [{"id": 1, "name": "Cyklo pruh"}]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["plznito-3.db.gz", "plznito.db", "restored.db"]
 
 
 def test_import_rejects_non_list(tmp_path):

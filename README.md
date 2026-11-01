@@ -65,8 +65,8 @@ Import, export and backup:
 python -m plznito_monitoring.run_db_update --import-json plznito_monitoring/plznito_all.json
 # Write all tickets as a JSON list
 python -m plznito_monitoring.run_db_update --export-json plznito_all.json
-# Consistent copy, safe while the web app reads the DB
-python -m plznito_monitoring.run_db_update --backup plznito_monitoring/backups/plznito.db
+# Consistent copy, safe while the web app reads the DB; gzipped when the name ends with .gz
+python -m plznito_monitoring.run_db_update --backup plznito_monitoring/backups/plznito.db.gz
 ```
 
 Useful queries:
@@ -94,7 +94,7 @@ The page layout lives in `plznito_monitoring/map_template.html` (plain HTML/CSS/
 plznito_monitoring/download_and_render.sh   # works from any directory; PYTHON=... to pick the interpreter
 ```
 
-The first run of each day also writes `plznito_monitoring/backups/plznito-<weekday 1-7>.db`, a rolling week of backups. To restore one, stop the cron job and copy it over `plznito.db`.
+The first run of each day also writes `plznito_monitoring/backups/plznito-<weekday 1-7>.db.gz`, a rolling week of gzipped backups (~20 MB each). To restore one, stop the cron job and run `gunzip -c plznito_monitoring/backups/plznito-<N>.db.gz > plznito_monitoring/plznito.db`.
 
 **Cron setup** (every 6 hours):
 ```shell

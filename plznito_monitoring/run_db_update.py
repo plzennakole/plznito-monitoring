@@ -9,10 +9,13 @@ Other modes: rebuild from snapshots (``--restore``), import or export a JSON lis
 import argparse
 import bz2
 import contextlib
+import gzip
 import json
 import logging
 import os
+import shutil
 import sqlite3
+import tempfile
 import threading
 import time
 from collections import Counter
@@ -470,14 +473,26 @@ def db_export_json(db_path: str, json_path: str) -> None:
 
 def db_backup(db_path: str, backup_path: str) -> None:
     """
-    Write a consistent copy of the DB.
+    Write a consistent copy of the DB, gzip-compressed if ``backup_path`` ends with ``.gz``.
+
+    A compressed copy is about 8x smaller. It is written next to the target and then moved over it,
+    so an interrupted run never leaves a truncated backup in place of the previous one.
 
     :param db_path: Existing DB file.
     :param backup_path: Target file; its directory must exist.
     """
     with contextlib.closing(db.connect(db_path, create=False)) as conn:
-        db.backup(conn, backup_path)
-    logger.info("Backed up %s to %s.", db_path, backup_path)
+        if not backup_path.endswith('.gz'):
+            db.backup(conn, backup_path)
+        else:
+            with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(backup_path))) as tmp_dir:
+                plain_path = os.path.join(tmp_dir, 'backup.db')
+                gz_path = os.path.join(tmp_dir, 'backup.db.gz')
+                db.backup(conn, plain_path)
+                with open(plain_path, 'rb') as fr, gzip.open(gz_path, 'wb', compresslevel=6) as fw:
+                    shutil.copyfileobj(fr, fw)
+                os.replace(gz_path, backup_path)
+    logger.info("Backed up %s to %s (%.1f MB).", db_path, backup_path, os.path.getsize(backup_path) / 1e6)
 
 
 def db_update(
@@ -527,7 +542,7 @@ def main() -> None:
     mode.add_argument("--restore", action="store_true", help="Merge the snapshots in --seed-data-dir, no scraping.")
     mode.add_argument("--import-json", type=str, default=None, help="Merge a JSON list of records, no scraping.")
     mode.add_argument("--export-json", type=str, default=None, help="Write all records as a JSON list.")
-    mode.add_argument("--backup", type=str, default=None, help="Write a copy of the DB to this file.")
+    mode.add_argument("--backup", type=str, default=None, help="Write a DB copy here, gzipped if *.gz.")
     parser.add_argument("--save_update_data", action="store_true")
     parser.add_argument("--anchor-id", type=int, default=None)
     parser.add_argument("--id-window-back", type=int, default=ID_WINDOW_BACK_DEFAULT)
