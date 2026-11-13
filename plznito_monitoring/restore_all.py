@@ -15,7 +15,6 @@ from typing import Any
 import requests
 import tqdm
 from requests.adapters import HTTPAdapter
-from requests.exceptions import RequestException
 from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
@@ -84,25 +83,27 @@ def download_one_id(ticket_id: int) -> dict[str, Any]:
     """
     Download one ticket.
 
+    Only a missing ticket gives an empty result. Any other failure raises, so a caller never mistakes
+    a ticket it failed to download for a deleted one (and e.g. moves the DB past it for good).
+
     :param ticket_id: Plznito ticket id.
-    :return: ``{"item": {...}}``, or ``{}`` if the ticket does not exist or could not be fetched.
+    :raises requests.RequestException: If the request fails (after retries) or returns another error status.
+    :raises ValueError: If the response is not valid JSON.
+    :raises PlznitoApiError: If the response is not ``{"item": {...}}``.
+    :return: ``{"item": {...}}``, or ``{}`` if the ticket does not exist (HTTP 404 or 503).
     """
-    try:
-        r = SESSION.get(API_DETAIL_URL.format(ticket_id=ticket_id), timeout=REQUEST_TIMEOUT_SECONDS)
-        if r.status_code in MISSING_TICKET_STATUSES:
-            # Expected for deleted and archived tickets; the crawl summary counts them.
-            logger.debug("No ticket %s (HTTP %d).", ticket_id, r.status_code)
-            return {}
-        r.raise_for_status()
-        payload = r.json()
-    except (RequestException, ValueError) as e:
-        logger.warning("Download failed for id %s: %s", ticket_id, e)
+    url = API_DETAIL_URL.format(ticket_id=ticket_id)
+    r = SESSION.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
+    if r.status_code in MISSING_TICKET_STATUSES:
+        # Expected for deleted and archived tickets; the crawl summary counts them.
+        logger.debug("No ticket %s (HTTP %d).", ticket_id, r.status_code)
         return {}
+    r.raise_for_status()
+    payload = r.json()
 
     item = payload.get('item') if isinstance(payload, dict) else None
     if not isinstance(item, dict) or not item:
-        logger.warning("Unexpected detail payload for id %s: %.200r", ticket_id, payload)
-        return {}
+        raise PlznitoApiError(f"Unexpected detail payload from {url}: {str(payload)[:200]}")
     return {"item": normalize_api_item(item)}
 
 
@@ -128,8 +129,8 @@ def download_range(data_dir: str, start_id: int, end_id: int) -> None:
     """
     Download tickets ``start_id..end_id`` (inclusive) into ``<data_dir>/<id>.json``.
 
-    Ids that already have a file are skipped (delete a file to download it again);
-    failed downloads are not written.
+    Ids that already have a file are skipped (delete a file to download it again), so after a failed
+    download the same command resumes where it stopped. Missing tickets get no file.
 
     :param data_dir: Existing target directory.
     :param start_id: First ticket id.

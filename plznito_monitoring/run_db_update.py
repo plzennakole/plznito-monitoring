@@ -87,12 +87,15 @@ def get_plznito_current_data(db_max_id: int | None, id_window_back: int = ID_WIN
 
     The ids from ``db_max_id - id_window_back`` to the newest listed id are covered; the list also
     refreshes older tickets it contains. Ids missing from the list (older than the list, or deleted)
-    are downloaded one by one, at most :data:`MAX_CRAWL_IDS` ids per run.
+    are downloaded one by one, at most :data:`MAX_CRAWL_IDS` ids per run. Any failed download raises
+    before anything is stored, so the next run retries the same range instead of moving the DB past
+    a ticket it never got.
 
     :param db_max_id: Highest ticket id in the DB, ``None`` for an empty DB (then only the list is used).
     :param id_window_back: How many ids before ``db_max_id`` to re-check (status updates).
-    :raises ValueError: If ``id_window_back`` is negative.
-    :raises PlznitoApiError: If the ticket list is empty, i.e. the API probably changed.
+    :raises ValueError: If ``id_window_back`` is negative or not below :data:`MAX_CRAWL_IDS`.
+    :raises PlznitoApiError: If the ticket list is empty (the API probably changed) or a payload is unexpected.
+    :raises requests.RequestException: If a download fails.
     :return: Update payload ``{"items": [...], "stats": {...}}``.
     """
     if not 0 <= id_window_back < MAX_CRAWL_IDS:

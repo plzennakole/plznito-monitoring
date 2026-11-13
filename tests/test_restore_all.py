@@ -72,32 +72,41 @@ def test_download_one_id(mocker: MockerFixture) -> None:
     assert 'urgency' not in result['item']
 
 
+@pytest.mark.parametrize('status', [503, 404])
+def test_download_one_id_missing_ticket(mocker: MockerFixture, status: int) -> None:
+    # The API's answer for deleted and archived tickets: an expected gap, not an error.
+    mocker.patch.object(restore_all.SESSION, 'get', return_value=_response(status=status))
+    assert restore_all.download_one_id(1) == {}
+
+
 @pytest.mark.parametrize(
-    'response',
+    'response, error',
     [
-        _response(status=503),  # deleted or archived ticket
-        _response(status=404),
-        _response(status=500),
-        _response({'item': None}),
-        _response({'item': {}}),
-        _response([]),
+        (_response(status=500), requests.HTTPError),
+        (_response(status=429), requests.HTTPError),
+        (_response({'item': None}), restore_all.PlznitoApiError),
+        (_response({'item': {}}), restore_all.PlznitoApiError),
+        (_response([]), restore_all.PlznitoApiError),
     ],
 )
-def test_download_one_id_missing_or_failed(mocker: MockerFixture, response: MagicMock) -> None:
+def test_download_one_id_failure_raises(mocker: MockerFixture, response: MagicMock, error: type[Exception]) -> None:
     mocker.patch.object(restore_all.SESSION, 'get', return_value=response)
-    assert restore_all.download_one_id(1) == {}
+    with pytest.raises(error):
+        restore_all.download_one_id(1)
 
 
-def test_download_one_id_network_error(mocker: MockerFixture) -> None:
+def test_download_one_id_network_error_raises(mocker: MockerFixture) -> None:
     mocker.patch.object(restore_all.SESSION, 'get', side_effect=requests.ConnectionError("down"))
-    assert restore_all.download_one_id(1) == {}
+    with pytest.raises(requests.ConnectionError):
+        restore_all.download_one_id(1)
 
 
-def test_download_one_id_invalid_json(mocker: MockerFixture) -> None:
+def test_download_one_id_invalid_json_raises(mocker: MockerFixture) -> None:
     response = _response()
     response.json.side_effect = json.JSONDecodeError("bad", "", 0)
     mocker.patch.object(restore_all.SESSION, 'get', return_value=response)
-    assert restore_all.download_one_id(1) == {}
+    with pytest.raises(ValueError):
+        restore_all.download_one_id(1)
 
 
 def test_download_recent(mocker: MockerFixture) -> None:
@@ -143,3 +152,19 @@ def test_download_range_skips_existing_and_failed(mocker: MockerFixture, tmp_pat
     assert [call.args[0] for call in mock_download.call_args_list] == [2, 3]
     assert sorted(p.name for p in tmp_path.iterdir()) == ['1.json', '2.json']
     assert json.loads((tmp_path / '2.json').read_text(encoding='utf-8')) == {'item': {'id': 2}}
+
+
+def test_download_range_stops_on_failure_and_resumes(mocker: MockerFixture, tmp_path: pathlib.Path) -> None:
+    def flaky(ticket_id: int) -> dict:
+        if ticket_id == 2:
+            raise requests.ConnectionError("down")
+        return {'item': {'id': ticket_id}}
+
+    mocker.patch.object(restore_all, 'download_one_id', side_effect=flaky)
+    with pytest.raises(requests.ConnectionError):
+        restore_all.download_range(str(tmp_path), 1, 3)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['1.json']
+
+    mock_download = mocker.patch.object(restore_all, 'download_one_id', side_effect=lambda i: {'item': {'id': i}})
+    restore_all.download_range(str(tmp_path), 1, 3)
+    assert [call.args[0] for call in mock_download.call_args_list] == [2, 3]

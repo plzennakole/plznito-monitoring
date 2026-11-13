@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import pytest
+import requests
 
 from plznito_monitoring import db
 from plznito_monitoring import run_db_update as db_update
@@ -118,6 +119,31 @@ def test_current_data_empty_list_fails_loudly():
     ):
         db_update.get_plznito_current_data(100)
     mock_download.assert_not_called()
+
+
+def test_update_with_failed_download_fails_without_advancing_the_db(tmp_path):
+    # DB ends at 100, the list has 501-600 and id 101 hits a connection error: the run must fail and store
+    # nothing, so the next run starts from 100 again instead of 500 and retries 101.
+    db_path = str(tmp_path / "plznito.db")
+    _db_with(db_path, [{"id": 100, "name": "A"}])
+    calls, fake_download, fake_list = _fake_site(set(range(101, 601)), listed_ids=range(501, 601))
+
+    def flaky_download(ticket_id):
+        if ticket_id == 101:
+            raise requests.ConnectionError("connection reset")
+        return fake_download(ticket_id)
+
+    with (
+        patch.object(db_update, "download_one_id", side_effect=flaky_download),
+        patch.object(db_update, "download_recent", side_effect=fake_list),
+        pytest.raises(requests.ConnectionError),
+    ):
+        db_update.db_update(db_path, id_window_back=0)
+
+    with contextlib.closing(db.connect(db_path)) as conn:
+        assert db.max_id(conn) == 100
+        assert db.count_records(conn) == 1
+    assert _runs(db_path) == [(0, {"mode": "update"})]
 
 
 def test_current_data_rejects_negative_window():
