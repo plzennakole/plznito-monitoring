@@ -95,8 +95,8 @@ def get_plznito_current_data(db_max_id: int | None, id_window_back: int = ID_WIN
     :raises PlznitoApiError: If the ticket list is empty, i.e. the API probably changed.
     :return: Update payload ``{"items": [...], "stats": {...}}``.
     """
-    if id_window_back < 0:
-        raise ValueError("id_window_back must be >= 0.")
+    if not 0 <= id_window_back < MAX_CRAWL_IDS:
+        raise ValueError(f"id_window_back must be >= 0 and < {MAX_CRAWL_IDS}.")
 
     listed = db.collect_valid_records(download_recent(RECENT_DAYS), "ticket list")
     if not listed:
