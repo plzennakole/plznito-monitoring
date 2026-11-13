@@ -35,7 +35,7 @@ Server configuration is in `config.json` (port, debug mode, WSGI backend: `flask
 
 ### 1. Plznito map (`plznito_monitoring/`)
 
-Scrapes civic tickets from plznito.cz and renders interactive Leaflet maps.
+Downloads civic tickets from plznito.cz and renders interactive Leaflet maps.
 
 All commands run from the repo root as modules (`python -m ...`). Defaults (log file, `data/` seed dir, snapshots) live in `plznito_monitoring/`, regardless of the working directory.
 
@@ -46,12 +46,12 @@ All commands run from the repo root as modules (`python -m ...`). Defaults (log 
 python -m plznito_monitoring.run_db_update                 # default --db plznito_monitoring/plznito.db
 ```
 
-Optional crawl tuning:
+Each update downloads the list of recent tickets from the plznito.cz API (`/api/3.0/tickets/list`, the newest ~500 tickets) and fetches the ids it misses one by one (`/api/3.0/ticket/detail/<id>`), from 100 ids below the DB's highest id up to the newest listed one. A longer re-check window:
 ```shell
-python -m plznito_monitoring.run_db_update --anchor-id 49553 --id-window-back 500 --id-lookahead 300
+python -m plznito_monitoring.run_db_update --id-window-back 500
 ```
 
-Restore-only mode (no live scrape; merges the `plznito_monitoring/data/` snapshots into the DB):
+Restore-only mode (no download; merges the `plznito_monitoring/data/` snapshots into the DB):
 ```shell
 # Optionally bulk-download a range of tickets into data/<id>.json first
 python -m plznito_monitoring.restore_all --start-id 49000 --end-id 49600
@@ -104,10 +104,10 @@ The first run of each day also writes `plznito_monitoring/backups/plznito-<weekd
 **Logs:** `plznito_monitoring/plznito_monitoring.log` has the details; stderr (cron mail, deploy log) only gets warnings and errors. Each run ends with one line like
 
 ```
-INFO plznito_monitoring.run_db_update: Update OK in 12.4 s: ids 55286-55586 (anchor 55386 from db), 49 HTTP requests, 83 tickets scraped (5 new, 12 updated, 66 unchanged), 76 ids without a ticket; plznito_monitoring/plznito.db now has 48112 records, newest #55391 from 20.10.2026.
+INFO plznito_monitoring.run_db_update: Update OK in 3.1 s: ids 55786-55888, 512 listed, 16 HTTP requests, 512 tickets downloaded (5 new, 12 updated, 495 unchanged), 15 ids without a ticket; plznito_monitoring/plznito.db now has 48112 records, newest #55391 from 20.10.2026.
 ```
 
-and the wrapper adds `job: <step> finished in N s` or `job: <step> FAILED with exit code N`. The same run is in the `runs` table; a failed run has `ok = 0`, an interrupted one no `finished_at`. A run that finds no new ticket while the newest one is more than 3 days old logs a warning. If the DB has fallen behind (e.g. the job did not run for a while), the next run catches up to the newest ticket listed on plznito.cz (at most 20 000 ids per run) and says so in the log.
+and the wrapper adds `job: <step> finished in N s` or `job: <step> FAILED with exit code N`. The same run is in the `runs` table; a failed run has `ok = 0`, an interrupted one no `finished_at`. A run that finds no new ticket while the newest one is more than 3 days old logs a warning. If the DB has fallen behind (e.g. the job did not run for a while), the next run catches up to the newest ticket listed on plznito.cz (at most 20 000 ids per run) and says so in the log. An empty ticket list from plznito.cz fails the run, since it means the API has changed.
 
 **uWSGI:** "OSError: write error" / "uwsgi_response_write_body_do(): Broken pipe" means a browser closed the connection before the response was sent; it cannot be retried server-side. Map pages are served gzipped (16 MB -> ~2.4 MB) with `ETag`/`Last-Modified`, so this is now rare. To keep such disconnects out of the error log, add to the uWSGI config:
 
@@ -128,7 +128,7 @@ disable-write-exception = true
 
 The API reads `plznito.db` (override with `PLZNITO_DB`) into memory and reloads it after each successful update run. Responses carry `Last-Modified` and `Cache-Control: public, max-age=300`; clients sending `If-Modified-Since` get `304` until new data is downloaded. For incremental sync, store the highest seen `id` and ask for `?since_id=<id>`.
 
-plznito.cz no longer publishes creation dates: scraped tickets only carry the date of their last status change. For those, `created` is estimated as the earliest date among the ticket and the next 50 ids (ids are assigned in creation order), marked `created_is_estimate: true`; on 42k tickets with known dates the estimate is within 1 day (median) and 4 days (p99). The maps use the same estimate for the time filters and show it as `≈ dd.mm.yyyy`.
+Tickets scraped from the old plznito.cz web map (until November 2026) have no creation date, only the date of their last status change; the v3 API gives `created` again. Updates refresh only the recent tickets; to fill in `created` for older ones, download them with `restore_all --start-id ... --end-id ...` into an empty `--data_dir` and merge it with `run_db_update --restore --seed-data-dir <that dir>`. For those, `created` is estimated as the earliest date among the ticket and the next 50 ids (ids are assigned in creation order), marked `created_is_estimate: true`; on 42k tickets with known dates the estimate is within 1 day (median) and 4 days (p99). The maps use the same estimate for the time filters and show it as `≈ dd.mm.yyyy`.
 
 ---
 

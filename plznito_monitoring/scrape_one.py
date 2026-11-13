@@ -11,11 +11,10 @@ def main() -> None:
     """Command line entry point."""
     parser = argparse.ArgumentParser()
     parser.add_argument("id", type=int)
-    parser.add_argument("--source", type=str, default="auto", choices=["auto", "api", "web"])
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args()
 
-    data = download_one_id(args.id, source=args.source)
+    data = download_one_id(args.id)
     indent = 2 if args.pretty else None
     print(json.dumps(data, indent=indent, ensure_ascii=False))
 

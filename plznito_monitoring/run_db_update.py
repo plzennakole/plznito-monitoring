@@ -1,6 +1,6 @@
 # Copyright 2026 Plzeň na kole Inc. All rights reserved.
 """
-Update the Plznito SQLite DB by scraping recent tickets.
+Update the Plznito SQLite DB with the recent tickets from the plznito.cz API.
 
 Other modes: rebuild from snapshots (``--restore``), import or export a JSON list
 (``--import-json``, ``--export-json``) and write a backup copy (``--backup``).
@@ -16,7 +16,6 @@ import os
 import shutil
 import sqlite3
 import tempfile
-import threading
 import time
 from collections import Counter
 from collections.abc import Iterator
@@ -26,22 +25,20 @@ from pathlib import Path
 from typing import Any
 
 from plznito_monitoring import db
-from plznito_monitoring.common import atomic_write_json, load_json, parse_int, setup_logging
-from plznito_monitoring.restore_all import download_one_id, scrape_map_page
+from plznito_monitoring.common import atomic_write_json, load_json, setup_logging
+from plznito_monitoring.restore_all import API_LIST_URL, PlznitoApiError, download_one_id, download_recent
 from plznito_monitoring.run_map_render import _parse_item_datetime
 
 logger = logging.getLogger(__name__)
 # Defaults live next to this file, so the scripts work from any working directory.
 PLZNITO_DIR = Path(__file__).parent
 ID_WINDOW_BACK_DEFAULT = 100
-ID_LOOKAHEAD_DEFAULT = 200
 SEED_DATA_DIR_DEFAULT = str(PLZNITO_DIR / "data")
 LOG_FILE_DEFAULT = str(PLZNITO_DIR / "plznito_monitoring.log")
 SNAPSHOT_DIR_DEFAULT = str(PLZNITO_DIR / "notebooks")
-MAX_CONSECUTIVE_SCRAPE_FAILURES = 10
-# Ids are fetched in ordered chunks, so a crawl stop wastes at most one chunk of requests.
-SCRAPE_CHUNK_SIZE = 10
-SCRAPE_WORKERS = 5
+DOWNLOAD_WORKERS = 5
+# The ticket list covers this many days, capped by the API at the newest ~500 tickets.
+RECENT_DAYS = 90
 # After an outage the DB can be far behind; one run catches up at most this many ids.
 MAX_CRAWL_IDS = 20000
 # Warn when a run finds no new ticket and the newest one is older than this.
@@ -53,10 +50,6 @@ Record = dict[str, Any]
 
 class InvalidPayloadError(ValueError):
     """Raised when a JSON file or snapshot does not have the expected shape."""
-
-
-class AnchorResolutionError(ValueError):
-    """Raised when no ticket id is known to start the crawl from."""
 
 
 def _save_raw_snapshot(data: dict[str, list[Any]], out_dirname: str) -> None:
@@ -73,232 +66,91 @@ def _save_raw_snapshot(data: dict[str, list[Any]], out_dirname: str) -> None:
     logger.info("Saved raw update snapshot to %s.", snapshot_path)
 
 
-def _max_seed_json_id(seed_data_dir: str) -> int | None:
+def _extract_item(download_output: Any) -> Record | None:
     """
-    Highest ticket id among ``<id>.json`` files in the seed directory.
+    Return the non-empty ``item`` of a download result.
 
-    :param seed_data_dir: Directory with per-id seed files.
-    :return: Highest id, or ``None`` if the directory is missing or has no such files.
+    :param download_output: Result of :func:`download_one_id`.
+    :return: The item, or ``None`` for failed or empty downloads.
     """
-    if not seed_data_dir:
+    if not isinstance(download_output, dict):
         return None
-    if not os.path.isdir(seed_data_dir):
-        logger.warning("Seed data directory %s does not exist.", seed_data_dir)
-        return None
-
-    file_ids = [
-        int(stem)
-        for stem, ext in (os.path.splitext(fname) for fname in os.listdir(seed_data_dir))
-        if ext == ".json" and stem.isdigit()
-    ]
-    return max(file_ids, default=None)
-
-
-def _resolve_anchor_id(
-    db_max_id: int | None,
-    anchor_id: int | None = None,
-    seed_data_dir: str = SEED_DATA_DIR_DEFAULT,
-) -> tuple[int, str]:
-    """
-    Pick the ticket id to crawl around: the DB's highest id, else the CLI value, else the seed directory.
-
-    :param db_max_id: Highest ticket id in the DB, ``None`` for an empty DB.
-    :param anchor_id: Anchor given on the command line.
-    :param seed_data_dir: Directory with per-id seed files.
-    :raises AnchorResolutionError: If none of the sources gives an id.
-    :return: ``(anchor id, source name)``.
-    """
-    if db_max_id is not None:
-        return db_max_id, "db"
-
-    cli_anchor = parse_int(anchor_id)
-    if cli_anchor is not None:
-        return cli_anchor, "cli"
-
-    seed_anchor = _max_seed_json_id(seed_data_dir)
-    if seed_anchor is not None:
-        return seed_anchor, f"seed:{seed_data_dir}"
-
-    raise AnchorResolutionError(
-        f"Unable to resolve crawl anchor id. Provide --anchor-id or place numeric *.json files in {seed_data_dir}."
-    )
-
-
-def _resolve_crawl_range(
-    anchor_id: int,
-    id_window_back: int = ID_WINDOW_BACK_DEFAULT,
-    id_lookahead: int = ID_LOOKAHEAD_DEFAULT,
-) -> tuple[int, int]:
-    """
-    Inclusive id range to crawl around the anchor.
-
-    :param anchor_id: Anchor ticket id.
-    :param id_window_back: How many ids before the anchor to re-check (status updates).
-    :param id_lookahead: How many ids after the anchor to try (new tickets).
-    :raises ValueError: If the anchor is ``None`` or a window is negative.
-    :return: ``(start id, end id)``, start at least 1.
-    """
-    if anchor_id is None:
-        raise ValueError("anchor_id must not be None.")
-    if id_window_back < 0:
-        raise ValueError("id_window_back must be >= 0.")
-    if id_lookahead < 0:
-        raise ValueError("id_lookahead must be >= 0.")
-
-    start_id = max(1, anchor_id - id_window_back)
-    end_id = anchor_id + id_lookahead
-    return start_id, end_id
-
-
-def _extract_item(scraper_output: Any) -> Record | None:
-    """
-    Return the non-empty ``item`` of a scraper result.
-
-    :param scraper_output: Result of :func:`download_one_id`.
-    :return: The item, or ``None`` for failed or empty scrapes.
-    """
-    if not isinstance(scraper_output, dict):
-        return None
-    item = scraper_output.get("item")
+    item = download_output.get("item")
     if not isinstance(item, dict) or not item:
         return None
     return item
 
 
-def _scrape_in_chunks(
-    start_id: int, end_id: int, known: dict[int, Record], counter: dict[str, int]
-) -> Iterator[tuple[int, Any]]:
+def get_plznito_current_data(db_max_id: int | None, id_window_back: int = ID_WINDOW_BACK_DEFAULT) -> dict[str, Any]:
     """
-    Scrape ids ``start_id..end_id`` in parallel, yielding results in id order.
+    Download the recent tickets: the API ticket list, plus the detail of every id it misses.
 
-    Ids in ``known`` are not downloaded again. Ids are submitted one chunk at a time, so
-    stopping the iteration stops further requests.
+    The ids from ``db_max_id - id_window_back`` to the newest listed id are covered; the list also
+    refreshes older tickets it contains. Ids missing from the list (older than the list, or deleted)
+    are downloaded one by one, at most :data:`MAX_CRAWL_IDS` ids per run.
 
-    :param start_id: First ticket id.
-    :param end_id: Last ticket id (inclusive).
-    :param known: Already scraped records by id.
-    :param counter: ``counter['requests']`` is increased by the downloads actually started.
-    :return: Iterator of ``(ticket id, scraper output)``.
-    """
-    # Downloads of a chunk that have not started when the iteration stops are cancelled,
-    # so they are counted when they run, not when they are submitted.
-    counter_lock = threading.Lock()
-
-    def scrape(ticket_id: int) -> Any:
-        if ticket_id in known:
-            return {"item": known[ticket_id]}
-        with counter_lock:
-            counter['requests'] += 1
-        return download_one_id(ticket_id, source="web")
-
-    with ThreadPoolExecutor(max_workers=SCRAPE_WORKERS) as executor:
-        for chunk_start in range(start_id, end_id + 1, SCRAPE_CHUNK_SIZE):
-            chunk = range(chunk_start, min(chunk_start + SCRAPE_CHUNK_SIZE, end_id + 1))
-            yield from zip(chunk, executor.map(scrape, chunk), strict=True)
-
-
-def get_plznito_current_data(
-    db_max_id: int | None,
-    anchor_id: int | None = None,
-    id_window_back: int = ID_WINDOW_BACK_DEFAULT,
-    id_lookahead: int = ID_LOOKAHEAD_DEFAULT,
-    seed_data_dir: str = SEED_DATA_DIR_DEFAULT,
-) -> dict[str, Any]:
-    """
-    Scrape the web map detail pages of tickets around the anchor id.
-
-    The crawl stops early after :data:`MAX_CONSECUTIVE_SCRAPE_FAILURES` empty results in a row.
-
-    :param db_max_id: Highest ticket id in the DB (the anchor), ``None`` for an empty DB.
-    :param anchor_id: Fallback anchor if the DB is empty.
-    :param id_window_back: How many ids before the anchor to re-check.
-    :param id_lookahead: How many ids after the anchor to try.
-    :param seed_data_dir: Last-resort anchor source.
+    :param db_max_id: Highest ticket id in the DB, ``None`` for an empty DB (then only the list is used).
+    :param id_window_back: How many ids before ``db_max_id`` to re-check (status updates).
+    :raises ValueError: If ``id_window_back`` is negative.
+    :raises PlznitoApiError: If the ticket list is empty, i.e. the API probably changed.
     :return: Update payload ``{"items": [...], "stats": {...}}``.
     """
-    resolved_anchor, anchor_source = _resolve_anchor_id(
-        db_max_id,
-        anchor_id=anchor_id,
-        seed_data_dir=seed_data_dir,
-    )
-    start_id, end_id = _resolve_crawl_range(
-        resolved_anchor,
-        id_window_back=id_window_back,
-        id_lookahead=id_lookahead,
-    )
+    if id_window_back < 0:
+        raise ValueError("id_window_back must be >= 0.")
 
-    # Every map page also lists the ~100 most recent tickets: one request usually covers most of the window,
-    # and the newest listed id tells how far behind the DB is.
-    listed = db.collect_valid_records(scrape_map_page(resolved_anchor), "anchor map page")
-    newest_listed = max((record_id for record_id, _ in listed), default=None)
-    # Only when the newest ticket is beyond the normal window; otherwise the window already covers it.
-    if newest_listed is not None and newest_listed >= end_id:
-        end_id = min(newest_listed + id_lookahead, start_id + MAX_CRAWL_IDS)
+    listed = db.collect_valid_records(download_recent(RECENT_DAYS), "ticket list")
+    if not listed:
+        raise PlznitoApiError(
+            f"The plznito.cz ticket list ({API_LIST_URL}) returned no tickets; the API has probably changed."
+        )
+    listed_ids = [record_id for record_id, _ in listed]
+    newest_listed = max(listed_ids)
+    start_id = min(listed_ids) if db_max_id is None else max(1, db_max_id - id_window_back)
+    end_id = newest_listed
+    if end_id - start_id > MAX_CRAWL_IDS:
+        end_id = start_id + MAX_CRAWL_IDS
+    if db_max_id is not None and newest_listed - db_max_id > len(listed):
         logger.warning(
-            "DB is %d tickets behind plznito.cz (newest listed id %d, anchor %d); catching up ids %d-%d.",
-            newest_listed - resolved_anchor,
+            "DB is %d tickets behind plznito.cz (newest listed id %d, DB max id %d); catching up ids %d-%d.",
+            newest_listed - db_max_id,
             newest_listed,
-            resolved_anchor,
+            db_max_id,
             start_id,
             end_id,
         )
-    if newest_listed is None:
-        logger.warning("Anchor map page for id %d listed no tickets; crawling id by id.", resolved_anchor)
-    known = {record_id: record for record_id, record in listed if start_id <= record_id <= end_id}
-    logger.info("Anchor map page covers %d ids of the crawl range %d-%d.", len(known), start_id, end_id)
 
-    items: list[Record] = []
-    empty_items = 0
-    consecutive_failures = 0
-    scanned_count = 0
-    counter = {'requests': 1}  # the anchor map page
-    for ticket_id, scraped_data in _scrape_in_chunks(start_id, end_id, known, counter):
-        scanned_count += 1
-        if scanned_count % PROGRESS_LOG_EVERY == 0:
-            logger.info(
-                "Crawl progress: id %d (%d/%d), %d tickets so far.",
-                ticket_id,
-                scanned_count,
-                end_id - start_id + 1,
-                len(items),
-            )
-        item = _extract_item(scraped_data)
-        if item is None:
-            empty_items += 1
-            consecutive_failures += 1
-            # Gaps (deleted tickets) below the newest listed id are expected; only stop beyond it.
-            beyond_newest = newest_listed is None or ticket_id > newest_listed
-            if beyond_newest and consecutive_failures >= MAX_CONSECUTIVE_SCRAPE_FAILURES:
-                logger.info(
-                    "Stopping crawl after %d consecutive failures at id %d.",
-                    consecutive_failures,
-                    ticket_id,
-                )
-                break
-            continue
-        logger.debug("Downloaded ticket %d via web scraping.", ticket_id)
-        items.append(item)
-        consecutive_failures = 0
-
+    # Listed tickets beyond a capped range are left for the next run, so the DB never skips ids.
+    items_by_id = {record_id: record for record_id, record in listed if record_id <= end_id}
+    missing_ids = [ticket_id for ticket_id in range(start_id, end_id + 1) if ticket_id not in items_by_id]
     logger.info(
-        "Downloaded current plznito payload via web scraping (anchor=%s, source=%s, range=%d-%d, "
-        "scanned=%d, items=%d, empty=%d).",
-        resolved_anchor,
-        anchor_source,
+        "Ticket list has %d tickets (ids %d-%d); downloading %d missing ids of the range %d-%d.",
+        len(listed),
+        min(listed_ids),
+        newest_listed,
+        len(missing_ids),
         start_id,
         end_id,
-        scanned_count,
-        len(items),
-        empty_items,
     )
+
+    empty_items = 0
+    with ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as executor:
+        results = executor.map(download_one_id, missing_ids)
+        for done, (ticket_id, output) in enumerate(zip(missing_ids, results, strict=True), start=1):
+            if done % PROGRESS_LOG_EVERY == 0:
+                logger.info("Download progress: id %d (%d/%d).", ticket_id, done, len(missing_ids))
+            item = _extract_item(output)
+            if item is None:
+                empty_items += 1
+                continue
+            items_by_id[ticket_id] = item
+
+    items = [items_by_id[record_id] for record_id in sorted(items_by_id)]
     stats: dict[str, Any] = {
-        'anchor': resolved_anchor,
-        'anchor_source': anchor_source,
         'start_id': start_id,
         'end_id': end_id,
-        'scanned': scanned_count,
+        'listed': len(listed),
         'newest_listed': newest_listed,
-        'requests': counter['requests'],
+        'requests': 1 + len(missing_ids),
         'empty': empty_items,
     }
     return {"items": items, "stats": stats}
@@ -311,7 +163,7 @@ def _log_update_summary(
     One INFO line describing the run, plus a WARNING when no new tickets seem to arrive any more.
 
     :param conn: DB connection.
-    :param data_current: Scraped payload with ``stats``.
+    :param data_current: Downloaded payload with ``stats``.
     :param counts: Result of :func:`plznito_monitoring.db.upsert_records`.
     :param db_path: DB file path.
     :param started: ``time.monotonic()`` at the start of the run.
@@ -324,13 +176,12 @@ def _log_update_summary(
     if newest_id is not None:
         newest_text = f"#{newest_id}" + (f" from {newest_date:%d.%m.%Y}" if newest_date else "")
     logger.info(
-        "Update OK in %.1f s: ids %s-%s (anchor %s from %s), %s HTTP requests, %d tickets scraped "
+        "Update OK in %.1f s: ids %s-%s, %s listed, %s HTTP requests, %d tickets downloaded "
         "(%d new, %d updated, %d unchanged), %s ids without a ticket; %s now has %d records, newest %s.",
         time.monotonic() - started,
         stats.get('start_id'),
         stats.get('end_id'),
-        stats.get('anchor'),
-        stats.get('anchor_source'),
+        stats.get('listed'),
         stats.get('requests'),
         counts.total(),
         counts['new'],
@@ -346,7 +197,7 @@ def _log_update_summary(
         if age_days > STALE_AFTER_DAYS:
             logger.warning(
                 "No new tickets: the newest ticket #%d is %d days old. Check that plznito.cz is reachable and "
-                "the map page format has not changed (python -m plznito_monitoring.scrape_one %d --source web).",
+                "its API has not changed (python -m plznito_monitoring.scrape_one %d).",
                 newest_id,
                 age_days,
                 newest_id + 1,
@@ -499,31 +350,19 @@ def db_update(
     db_path: str,
     out_dirname: str = "",
     save_update_data: bool = False,
-    anchor_id: int | None = None,
     id_window_back: int = ID_WINDOW_BACK_DEFAULT,
-    id_lookahead: int = ID_LOOKAHEAD_DEFAULT,
-    seed_data_dir: str = SEED_DATA_DIR_DEFAULT,
 ) -> None:
     """
-    Scrape recent tickets and merge them into the DB in one transaction.
+    Download recent tickets and merge them into the DB in one transaction.
 
     :param db_path: DB file to update (created if missing).
     :param out_dirname: Directory for the raw snapshot (``save_update_data``).
-    :param save_update_data: Also save the raw scraped payload.
-    :param anchor_id: Fallback crawl anchor for an empty DB.
-    :param id_window_back: How many ids before the anchor to re-check.
-    :param id_lookahead: How many ids after the anchor to try.
-    :param seed_data_dir: Last-resort anchor source.
+    :param save_update_data: Also save the raw downloaded payload.
+    :param id_window_back: How many ids before the DB's highest id to re-check.
     """
     started = time.monotonic()
     with contextlib.closing(db.connect(db_path)) as conn, _recorded_run(conn, "update") as stats:
-        data_current = get_plznito_current_data(
-            db.max_id(conn),
-            anchor_id=anchor_id,
-            id_window_back=id_window_back,
-            id_lookahead=id_lookahead,
-            seed_data_dir=seed_data_dir,
-        )
+        data_current = get_plznito_current_data(db.max_id(conn), id_window_back=id_window_back)
         stats.update(data_current.get("stats", {}))
 
         if save_update_data:
@@ -539,14 +378,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", type=str, default=str(db.DEFAULT_DB_PATH))
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--restore", action="store_true", help="Merge the snapshots in --seed-data-dir, no scraping.")
-    mode.add_argument("--import-json", type=str, default=None, help="Merge a JSON list of records, no scraping.")
+    mode.add_argument("--restore", action="store_true", help="Merge the snapshots in --seed-data-dir, no download.")
+    mode.add_argument("--import-json", type=str, default=None, help="Merge a JSON list of records, no download.")
     mode.add_argument("--export-json", type=str, default=None, help="Write all records as a JSON list.")
     mode.add_argument("--backup", type=str, default=None, help="Write a DB copy here, gzipped if *.gz.")
     parser.add_argument("--save_update_data", action="store_true")
-    parser.add_argument("--anchor-id", type=int, default=None)
     parser.add_argument("--id-window-back", type=int, default=ID_WINDOW_BACK_DEFAULT)
-    parser.add_argument("--id-lookahead", type=int, default=ID_LOOKAHEAD_DEFAULT)
     parser.add_argument("--seed-data-dir", type=str, default=SEED_DATA_DIR_DEFAULT)
     args = parser.parse_args()
 
@@ -581,10 +418,7 @@ def _run(args: argparse.Namespace) -> None:
             args.db,
             out_dirname=SNAPSHOT_DIR_DEFAULT,
             save_update_data=args.save_update_data,
-            anchor_id=args.anchor_id,
             id_window_back=args.id_window_back,
-            id_lookahead=args.id_lookahead,
-            seed_data_dir=args.seed_data_dir,
         )
 
 
