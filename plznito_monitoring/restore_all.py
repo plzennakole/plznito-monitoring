@@ -1,6 +1,6 @@
 # Copyright 2026 Plzeň na kole Inc. All rights reserved.
 """
-Download single Plznito tickets (JSON API or web map page).
+Download Plznito tickets from the plznito.cz JSON API (v3, the one the web app uses).
 
 Run as a script, it bulk-downloads a range of ticket ids into per-id seed files
 (``data/<id>.json``); rebuild the DB from them with ``run_db_update --restore``.
@@ -10,27 +10,37 @@ import argparse
 import json
 import logging
 import os
-import re
 from typing import Any
 
-import json5
 import requests
 import tqdm
 from requests.adapters import HTTPAdapter
-from requests.exceptions import RequestException
 from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
-API_DETAIL_URL = "https://www.plznito.cz/api/1.0/tickets/detail/{ticket_id}"
-MAP_URL = "https://www.plznito.cz/map/{ticket_id}"
+API_BASE_URL = "https://www.plznito.cz/api/3.0"
+API_DETAIL_URL = API_BASE_URL + "/ticket/detail/{ticket_id}"
+API_LIST_URL = API_BASE_URL + "/tickets/list"
 REQUEST_TIMEOUT_SECONDS = 20
 USER_AGENT = "plznito-monitoring/1.0 (+https://github.com/plzennakole/plznito-monitoring)"
+# The detail endpoint answers 503 (not 404) for deleted and archived tickets.
+MISSING_TICKET_STATUSES = (404, 503)
+# Fields describing what the current viewer may do with the ticket, not the ticket itself.
+VIEWER_FIELDS = ('urgency', 'editable')
+
+Record = dict[str, Any]
+
+
+class PlznitoApiError(Exception):
+    """Raised when the plznito.cz API answers with an unexpected payload."""
 
 
 def _make_session() -> requests.Session:
     """
     HTTP session reusing connections, retrying transient errors with backoff (1 s, 2 s, 4 s).
+
+    503 is not retried: the API uses it for missing tickets, so retrying would only slow down gaps in ids.
 
     :return: Configured session.
     """
@@ -38,7 +48,7 @@ def _make_session() -> requests.Session:
     retry = Retry(
         total=3,
         backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
+        status_forcelist=[429, 500, 502, 504],
         allowed_methods=['GET'],
         raise_on_status=False,
     )
@@ -53,118 +63,78 @@ def _make_session() -> requests.Session:
 SESSION = _make_session()
 
 
-def download_one_id(ticket_id: int, source: str = "auto") -> dict[str, Any]:
+def normalize_api_item(item: Record) -> Record:
+    """
+    Turn an API ticket into the record stored in the DB.
+
+    Drops the per-viewer fields and adds ``report`` (the cycling filter reads it; the old API had it,
+    v3 only has ``description``).
+
+    :param item: Ticket from the API.
+    :return: New record dict.
+    """
+    record = {key: value for key, value in item.items() if key not in VIEWER_FIELDS}
+    if not record.get('report'):
+        record['report'] = record.get('description') or ""
+    return record
+
+
+def download_one_id(ticket_id: int) -> dict[str, Any]:
     """
     Download one ticket.
 
-    :param ticket_id: Plznito ticket id.
-    :param source: ``"api"`` (JSON API only), ``"web"`` (map page only) or ``"auto"`` (API, then map page).
-    :return: ``{"item": {...}}`` (plus extra keys from the API), or ``{}`` if the ticket could not be fetched.
-    """
-    if source in ("auto", "api"):
-        try:
-            r = SESSION.get(API_DETAIL_URL.format(ticket_id=ticket_id), timeout=REQUEST_TIMEOUT_SECONDS)
-            r.raise_for_status()
-            out: dict[str, Any] = r.json()
-            if out:
-                return out
-        except (RequestException, ValueError) as e:
-            logger.warning("API failed for id %s: %s", ticket_id, e)
-        if source == "api":
-            return {}
-    return scrape_one_id_from_map(ticket_id)
-
-
-def scrape_map_page(ticket_id: int) -> list[dict[str, Any]]:
-    """
-    Scrape all tickets listed on the web map page of a ticket.
-
-    A page lists the requested ticket plus the ~100 most recent tickets.
+    Only a missing ticket gives an empty result. Any other failure raises, so a caller never mistakes
+    a ticket it failed to download for a deleted one (and e.g. moves the DB past it for good).
 
     :param ticket_id: Plznito ticket id.
-    :return: Ticket records, empty if the page failed to load or parse.
+    :raises requests.RequestException: If the request fails (after retries) or returns another error status.
+    :raises ValueError: If the response is not valid JSON.
+    :raises PlznitoApiError: If the response is not ``{"item": {...}}``.
+    :return: ``{"item": {...}}``, or ``{}`` if the ticket does not exist (HTTP 404 or 503).
     """
-    try:
-        r = SESSION.get(MAP_URL.format(ticket_id=ticket_id), timeout=REQUEST_TIMEOUT_SECONDS)
-        r.raise_for_status()
-    except RequestException as e:
-        logger.warning("Map fetch failed for id %s: %s", ticket_id, e)
-        return []
+    url = API_DETAIL_URL.format(ticket_id=ticket_id)
+    r = SESSION.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
+    if r.status_code in MISSING_TICKET_STATUSES:
+        # Expected for deleted and archived tickets; the crawl summary counts them.
+        logger.debug("No ticket %s (HTTP %d).", ticket_id, r.status_code)
+        return {}
+    r.raise_for_status()
+    payload = r.json()
 
-    try:
-        locations = _parse_locations_from_html(r.text)
-    except ValueError as e:
-        logger.warning("Failed to parse locations for id %s: %s", ticket_id, e)
-        return []
-    return [_location_to_item(location) for location in locations]
+    item = payload.get('item') if isinstance(payload, dict) else None
+    if not isinstance(item, dict) or not item:
+        raise PlznitoApiError(f"Unexpected detail payload from {url}: {str(payload)[:200]}")
+    return {"item": normalize_api_item(item)}
 
 
-def scrape_one_id_from_map(ticket_id: int) -> dict[str, Any]:
+def download_recent(recent_days: int) -> list[Record]:
     """
-    Scrape one ticket from its web map page.
+    Download the list of recent tickets (the API returns at most the newest ~500).
 
-    :param ticket_id: Plznito ticket id.
-    :return: ``{"item": {...}}``, or ``{}`` if the page failed to load or does not contain the ticket.
+    :param recent_days: Tickets created in the last N days.
+    :raises requests.RequestException: If the request fails.
+    :raises PlznitoApiError: If the response is not ``{"items": [...]}``.
+    :return: Ticket records.
     """
-    for item in scrape_map_page(ticket_id):
-        if str(item.get("id")) == str(ticket_id):
-            return {"item": item}
-
-    # Expected for deleted tickets and for ids not created yet; the crawl summary counts them.
-    logger.debug("No matching item for id %s in map page", ticket_id)
-    return {}
-
-
-def _parse_locations_from_html(html: str) -> list[dict[str, Any]]:
-    """
-    Extract the ``var locations = [...]`` JS array from a map page.
-
-    :param html: Page HTML.
-    :raises ValueError: If the array is not valid JSON5.
-    :return: Location objects, empty if the page has no such array.
-    """
-    match = re.search(r"var\s+locations\s*=\s*(\[[\s\S]*?\])\s*;", html)
-    if not match:
-        return []
-    locations: list[dict[str, Any]] = json5.loads(match.group(1))
-    return locations
+    r = SESSION.get(API_LIST_URL, params={'recentDays': recent_days}, timeout=REQUEST_TIMEOUT_SECONDS)
+    r.raise_for_status()
+    payload = r.json()
+    items = payload.get('items') if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        raise PlznitoApiError(f"Unexpected ticket list payload from {API_LIST_URL}: {str(payload)[:200]}")
+    return [normalize_api_item(item) for item in items if isinstance(item, dict)]
 
 
-def _location_to_item(location: dict[str, Any]) -> dict[str, Any]:
-    """
-    Map a map-page location to the record fields used by the rest of the pipeline.
-
-    :param location: One element of the page's ``locations`` array.
-    :return: Lightweight ticket record (``report`` duplicates ``description`` for the cycling filter).
-    """
-    return {
-        "id": location.get("id"),
-        "name": location.get("name", ""),
-        "report": location.get("description", ""),
-        "description": location.get("description", ""),
-        "solution": location.get("solution"),
-        "latitude": str(location.get("lat", "")) if "lat" in location else "",
-        "longitude": str(location.get("lng", "")) if "lng" in location else "",
-        "status": location.get("status"),
-        "status_id": location.get("status_id"),
-        "category": location.get("category"),
-        "address": location.get("address", ""),
-        "photos": location.get("photos", []),
-        "date": location.get("date"),
-    }
-
-
-def download_range(data_dir: str, start_id: int, end_id: int, source: str) -> None:
+def download_range(data_dir: str, start_id: int, end_id: int) -> None:
     """
     Download tickets ``start_id..end_id`` (inclusive) into ``<data_dir>/<id>.json``.
 
-    Ids that already have a file are skipped (delete a file to download it again);
-    failed downloads are not written.
+    Ids that already have a file are skipped (delete a file to download it again), so after a failed
+    download the same command resumes where it stopped. Missing tickets get no file.
 
     :param data_dir: Existing target directory.
     :param start_id: First ticket id.
     :param end_id: Last ticket id.
-    :param source: Passed to :func:`download_one_id`.
     """
     # One directory listing instead of an existence check per id.
     existing = set(os.listdir(data_dir))
@@ -172,7 +142,7 @@ def download_range(data_dir: str, start_id: int, end_id: int, source: str) -> No
         fname = f"{ticket_id}.json"
         if fname in existing:
             continue
-        json_data = download_one_id(ticket_id, source=source)
+        json_data = download_one_id(ticket_id)
         if not json_data:
             continue
         with open(os.path.join(data_dir, fname), "w", encoding="utf-8") as f:
@@ -185,17 +155,10 @@ def main() -> None:
     parser.add_argument("--data_dir", type=str, default=os.path.join(os.path.dirname(__file__), "data"))
     parser.add_argument("--start-id", type=int, required=True)
     parser.add_argument("--end-id", type=int, required=True)
-    parser.add_argument(
-        "--source",
-        type=str,
-        default="auto",
-        choices=["auto", "api", "web"],
-        help="Fetch source: auto (API fallback to web), api, or web.",
-    )
     args = parser.parse_args()
 
     os.makedirs(args.data_dir, exist_ok=True)
-    download_range(args.data_dir, args.start_id, args.end_id, args.source)
+    download_range(args.data_dir, args.start_id, args.end_id)
 
 
 if __name__ == "__main__":
