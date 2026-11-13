@@ -29,6 +29,11 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+
+class NotCsvError(Exception):
+    """The server answered with something other than a delimited CSV table."""
+
+
 # ── Database ───────────────────────────────────────────────────────────────────
 
 
@@ -72,6 +77,22 @@ def init_db():
 # ── HTTP helper ────────────────────────────────────────────────────────────────
 
 
+def _check_csv(text: str, url: str) -> None:
+    """
+    Make sure a downloaded body looks like a CSV table.
+
+    The opendata.plzen.eu proxy answers every path with HTTP 200 and the body
+    ``Request OK`` when the backend is down, so the status code alone is not enough.
+
+    :param text: Decoded response body.
+    :param url: URL the body came from, used in the error message.
+    :raises NotCsvError: If the first line contains no ``;``, tab or ``,`` delimiter.
+    """
+    first_line = text.strip().partition("\n")[0]
+    if not any(d in first_line for d in (';', '\t', ',')):
+        raise NotCsvError(f"{url} returned non-CSV body: {text.strip()[:100]!r}")
+
+
 def fetch(url, timeout=60, encoding=None) -> str:
     try:
         import requests
@@ -81,13 +102,19 @@ def fetch(url, timeout=60, encoding=None) -> str:
     r = requests.get(url, timeout=timeout)
     r.raise_for_status()
     if encoding:
-        return r.content.decode(encoding)
-    for enc in ("utf-8-sig", "utf-8", "cp1250"):
-        try:
-            return r.content.decode(enc)
-        except UnicodeDecodeError:
-            continue
-    return r.content.decode("utf-8", errors="replace")
+        text = r.content.decode(encoding)
+    else:
+        for enc in ("utf-8-sig", "utf-8", "cp1250"):
+            try:
+                text = r.content.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            text = r.content.decode("utf-8", errors="replace")
+    if text.strip():
+        _check_csv(text, url)
+    return text
 
 
 # ── Eco-counter ────────────────────────────────────────────────────────────────
@@ -150,16 +177,25 @@ def parse_ecocounter_csv(text: str) -> tuple[list[tuple], list[tuple]] | None:
     return rows_in, rows_out
 
 
-def ingest_ecocounter():
+def ingest_ecocounter() -> int:
+    """
+    Download the eco-counter CSV and upsert it into the DB.
+
+    :return: Number of interval records upserted.
+    """
     log.info("Eco-counter → %s", cfg.ECO_URL)
-    text = fetch(cfg.ECO_URL)
+    try:
+        text = fetch(cfg.ECO_URL)
+    except NotCsvError as e:
+        log.error("  %s", e)
+        return 0
     if not text.strip():
         log.warning("Empty eco-counter response")
-        return
+        return 0
 
     parsed = parse_ecocounter_csv(text)
     if parsed is None:
-        return
+        return 0
     rows_in, rows_out = parsed
 
     db = get_db()
@@ -181,6 +217,7 @@ def ingest_ecocounter():
         log.info("  Sample (last 3 rows_out): %s", rows_out[-3:])
     else:
         log.warning("  Eco-counter: 0 rows parsed — check CSV format")
+    return len(rows_in) + len(rows_out)
 
 
 # ── Camera ─────────────────────────────────────────────────────────────────────
@@ -259,19 +296,26 @@ def _parse_camera_csv(text: str, cam_id: str) -> list[tuple]:
     return rows
 
 
-def ingest_camera(cam_id: str, name: str):
+def ingest_camera(cam_id: str, name: str) -> int:
+    """
+    Download one camera's CSV and upsert it into the DB.
+
+    :param cam_id: Camera ID used in the API URL.
+    :param name: Human-readable location name, for logging.
+    :return: Number of records upserted.
+    """
     url = cfg.CAMERA_URL.format(cam_id=cam_id)
     log.info("Camera %s (%s) → %s", cam_id, name, url)
     try:
         text = fetch(url)
     except Exception as e:
         log.warning("  Download failed: %s", e)
-        return
+        return 0
 
     rows = _parse_camera_csv(text, cam_id)
     if not rows:
         log.warning("  Camera %s: no rows parsed", cam_id)
-        return
+        return 0
 
     db = get_db()
     try:
@@ -306,6 +350,7 @@ def ingest_camera(cam_id: str, name: str):
         cfg.SOURCE_MAP.update({c["source_id"]: (loc["id"], c) for c in loc["collectors"]})
 
     db.close()
+    return len(rows)
 
 
 # ── Weather ────────────────────────────────────────────────────────────────────
@@ -529,8 +574,9 @@ def main():
 
     init_db()
 
+    bike_rows = 0
     if args.source in ("all", "eco"):
-        ingest_ecocounter()
+        bike_rows += ingest_ecocounter()
 
     if args.source in ("all", "cam"):
         seen_cam_ids = set()
@@ -538,13 +584,16 @@ def main():
             if loc["type"] == "camera":
                 cam_id = loc["cam_id"]
                 if cam_id not in seen_cam_ids:
-                    ingest_camera(cam_id, loc["name"])
+                    bike_rows += ingest_camera(cam_id, loc["name"])
                     seen_cam_ids.add(cam_id)
 
     if args.source in ("all", "weather") and not args.no_weather:
         ingest_weather(delete_cache=args.delete_cache)
 
     checkpoint_db()
+    if args.source in ("all", "eco", "cam") and bike_rows == 0:
+        log.error("No bike-counter rows ingested from any source")
+        sys.exit(1)
     log.info("Done ✓")
 
 

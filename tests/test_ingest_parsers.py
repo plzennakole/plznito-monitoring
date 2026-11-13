@@ -2,6 +2,7 @@
 from datetime import date
 
 import pytest
+from pytest_mock import MockerFixture
 
 from bikecounters_web import ingest
 
@@ -138,3 +139,64 @@ def test_chmi_parse_recent_json() -> None:
 @pytest.mark.parametrize('data', [{}, None, {'data': {'data': {'header': 'A,B', 'values': []}}}])
 def test_chmi_parse_recent_json_unexpected_shape(data: object) -> None:
     assert ingest._chmi_parse_recent_json(data) == {}
+
+
+@pytest.mark.parametrize(
+    'body',
+    [
+        b'Request OK',
+        b'<html><body>Maintenance</body></html>',
+    ],
+)
+def test_fetch_rejects_non_csv(mocker: MockerFixture, body: bytes) -> None:
+    mocker.patch('requests.get', return_value=mocker.Mock(content=body))
+    with pytest.raises(ingest.NotCsvError, match="non-CSV"):
+        ingest.fetch('https://example.invalid/data')
+
+
+@pytest.mark.parametrize(
+    'body',
+    [
+        b'siteId;timestamp\n7;2025-06-01',
+        b'ID kolektoru\tZ\xc3\xa1\xc4\x8d\xc3\xa1tek intervalu\n5\t1.6.2025 08:00',
+        b'a,b\n1,2',
+        b'',
+    ],
+)
+def test_fetch_accepts_csv(mocker: MockerFixture, body: bytes) -> None:
+    mocker.patch('requests.get', return_value=mocker.Mock(content=body))
+    assert ingest.fetch('https://example.invalid/data') == body.decode('utf-8')
+
+
+def test_ingest_ecocounter_non_csv_returns_zero(mocker: MockerFixture) -> None:
+    mocker.patch.object(ingest, 'fetch', side_effect=ingest.NotCsvError("down"))
+    assert ingest.ingest_ecocounter() == 0
+
+
+@pytest.mark.parametrize(
+    ('argv', 'eco_rows', 'cam_rows', 'exit_code'),
+    [
+        (['--no-weather'], 0, 0, 1),
+        (['--no-weather'], 10, 0, None),
+        (['--no-weather'], 0, 5, None),
+        (['--source', 'cam'], 0, 0, 1),
+        (['--source', 'weather'], 0, 0, None),
+    ],
+)
+def test_main_exit_code(
+    mocker: MockerFixture, argv: list[str], eco_rows: int, cam_rows: int, exit_code: int | None
+) -> None:
+    mocker.patch('sys.argv', ['ingest', *argv])
+    mocker.patch.object(ingest.shutil, 'disk_usage', return_value=mocker.Mock(free=10**12))
+    mocker.patch.object(ingest, 'init_db')
+    mocker.patch.object(ingest, 'checkpoint_db')
+    mocker.patch.object(ingest, 'ingest_weather')
+    mocker.patch.object(ingest, 'ingest_ecocounter', return_value=eco_rows)
+    mocker.patch.object(ingest, 'ingest_camera', return_value=cam_rows)
+
+    if exit_code is None:
+        ingest.main()
+    else:
+        with pytest.raises(SystemExit) as exc:
+            ingest.main()
+        assert exc.value.code == exit_code
